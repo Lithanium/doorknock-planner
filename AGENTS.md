@@ -44,7 +44,9 @@ test` works on a fresh clone.
 - District boundary is OSM relation **15624487**, `boundary=political`,
   `political_division=au_vic_la`. 112 member ways -> 1 closed ring, 5.2 km N-S
   x 9.6 km E-W. Close enough to the VEC boundary for planning purposes.
-- **28,534 doors / 24,164 stops / 774 streets** inside the district.
+- **28,534 doors / 24,366 stops / 774 streets** inside the district. Stops
+  are keyed on street name + number + spatial cluster, so same-named streets
+  kilometres apart never merge.
   A bbox around the district gives 71,511 — it spills into Hawthorn and
   Camberwell, so always clip with `map_to_area`, never a bbox.
 - Address coverage is effectively complete (Vicmap import): 100% have
@@ -65,7 +67,7 @@ test` works on a fresh clone.
   three mirrors before succeeding on the 4th attempt. Mirror rotation with
   backoff is mandatory, not defensive padding.
 - **Street names are not unique within the district.** There are two Mary
-  Streets 5.8 km apart and two Henry Streets 5.0 km apart; 203 of 24,164 stops
+  Streets 5.8 km apart and two Henry Streets 5.0 km apart; 203 of the stops
   have records more than 150 m apart. Genuine multi-unit blocks never spread
   beyond 147 m (median 29 m), so 200 m single-link clustering separates the two
   cases cleanly. **Phase 3 blockface grouping must key on street name *plus*

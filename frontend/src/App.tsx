@@ -45,6 +45,7 @@ export function App() {
         setDistrict(d);
         setAddresses(a);
         setCoverage(c);
+        setError(null);
       })
       .catch((e: Error) => setError(e.message));
   }, []);
@@ -60,7 +61,10 @@ export function App() {
       api
         .geocode(query)
         .then((r) => {
-          if (token === searchToken.current) setCandidates(r.candidates);
+          if (token === searchToken.current) {
+            setCandidates(r.candidates);
+            setError(null);
+          }
         })
         .catch((e: Error) => setError(e.message))
         .finally(() => {
@@ -70,38 +74,31 @@ export function App() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const refreshPreview = useCallback((lat: number, lon: number, radius: number) => {
+  const chooseHub = useCallback((lat: number, lon: number, label: string) => {
+    setHub({ lat, lon, label });
+    setCandidates([]);
+  }, []);
+
+  const pickFromMap = useCallback((lat: number, lon: number) => {
     api
-      .hubPreview(lat, lon, radius)
-      .then(setPreview)
+      .reverse(lat, lon)
+      .then((r) => {
+        setHub({ lat, lon, label: `${r.label} (${Math.round(r.distance_m)} m away)` });
+        setError(null);
+      })
       .catch((e: Error) => setError(e.message));
   }, []);
 
-  const chooseHub = useCallback(
-    (lat: number, lon: number, label: string) => {
-      setHub({ lat, lon, label });
-      setCandidates([]);
-      refreshPreview(lat, lon, radiusM);
-    },
-    [radiusM, refreshPreview],
-  );
-
-  const pickFromMap = useCallback(
-    (lat: number, lon: number) => {
-      api
-        .reverse(lat, lon)
-        .then((r) => {
-          setHub({ lat, lon, label: `${r.label} (${Math.round(r.distance_m)} m away)` });
-          refreshPreview(lat, lon, radiusM);
-        })
-        .catch((e: Error) => setError(e.message));
-    },
-    [radiusM, refreshPreview],
-  );
-
   useEffect(() => {
-    if (hub) refreshPreview(hub.lat, hub.lon, radiusM);
-  }, [radiusM, hub, refreshPreview]);
+    if (!hub) return;
+    api
+      .hubPreview(hub.lat, hub.lon, radiusM)
+      .then((p) => {
+        setPreview(p);
+        setError(null);
+      })
+      .catch((e: Error) => setError(e.message));
+  }, [radiusM, hub]);
 
   if (health && !health.snapshot_available) {
     return (

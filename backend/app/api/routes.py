@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.coverage import estimate_effort
+from app.coverage import estimate_effort, stop_groups
 from app.osm.boundary import haversine_m, rings_to_geojson
 from app.services import SnapshotMissingError, SnapshotStore
 
@@ -134,7 +134,7 @@ def hub_preview(
     """Summarises the workload reachable from a candidate pamphlet hub."""
     snapshot = _require_snapshot(request)
     within = [a for a in snapshot.addresses if haversine_m((lat, lon), a.point) <= radius_m]
-    stops = {(a.street, a.number) for a in within}
+    stops = stop_groups(within)
     nearest = _store(request).geocoder.nearest(lat, lon)
     return {
         "lat": lat,

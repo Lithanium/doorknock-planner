@@ -65,8 +65,16 @@ class OverpassClient:
             except Exception as exc:  # noqa: BLE001 - any transport failure is retryable
                 last_error = exc
                 self._note(attempt, mirror, f"failed: {exc}")
-                if attempt < self.max_attempts - 1:
-                    self._sleep(self.base_backoff_s * (attempt + 1))
+                self._backoff(attempt)
+                continue
+            remark = _runtime_remark(body)
+            if remark:
+                # Overpass reports runtime errors (query timeouts, memory
+                # exhaustion) as HTTP 200 with a `remark`; the payload may be
+                # silently truncated, so it must not be accepted.
+                last_error = OverpassError(remark)
+                self._note(attempt, mirror, f"failed: {remark}")
+                self._backoff(attempt)
                 continue
             self._note(attempt, mirror, f"ok ({len(body) / 1e6:.1f} MB)")
             return body
@@ -81,6 +89,20 @@ class OverpassClient:
     def elements(self, ql: str) -> list[dict[str, Any]]:
         return self.query(ql).get("elements", [])
 
+    def _backoff(self, attempt: int) -> None:
+        if attempt < self.max_attempts - 1:
+            self._sleep(self.base_backoff_s * 2**attempt)
+
     def _note(self, attempt: int, mirror: str, message: str) -> None:
         if self._on_attempt:
             self._on_attempt(attempt, mirror, message)
+
+
+def _runtime_remark(body: bytes) -> str | None:
+    try:
+        payload = json.loads(body.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "response is not valid JSON"
+    if isinstance(payload, dict) and payload.get("remark"):
+        return f"overpass remark: {payload['remark']}"
+    return None

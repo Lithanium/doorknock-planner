@@ -87,6 +87,37 @@ def test_reports_progress_for_each_attempt():
     assert "ok" in notes[1][2]
 
 
+def test_retries_when_overpass_reports_a_runtime_remark():
+    """Overpass signals query timeouts as HTTP 200 with a `remark` and a
+    possibly truncated payload, which must never be accepted as a result."""
+    calls = []
+
+    def post(url, ql):
+        calls.append(url)
+        if len(calls) == 1:
+            return b'{"remark": "runtime error: Query timed out in \\"query\\"", "elements": []}'
+        return b'{"elements": [{"id": 1}]}'
+
+    client, slept = make_client(post)
+    assert client.elements("test") == [{"id": 1}]
+    assert calls == [MIRRORS[0], MIRRORS[1]]
+    assert slept == [1.0]
+
+
+def test_retries_when_the_body_is_not_json():
+    calls = []
+
+    def post(url, ql):
+        calls.append(url)
+        if len(calls) == 1:
+            return b"<html>Gateway Timeout</html>"
+        return b'{"elements": []}'
+
+    client, _slept = make_client(post)
+    assert client.elements("test") == []
+    assert len(calls) == 2
+
+
 def test_requires_at_least_one_mirror():
     with pytest.raises(ValueError):
         OverpassClient(mirrors=[])

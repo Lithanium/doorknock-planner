@@ -20,7 +20,12 @@ def create_app(snapshot_path: Path | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(DEV_ORIGINS),
-        allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):\d+",
+        # Private-network origins (RFC 1918), so phones on the LAN can reach
+        # the dev server whatever the local subnet is.
+        allow_origin_regex=(
+            r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+"
+            r"|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+):\d+"
+        ),
         allow_methods=["*"],
         allow_headers=["*"],
     )
