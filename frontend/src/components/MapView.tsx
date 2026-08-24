@@ -212,10 +212,8 @@ export function MapView({
         if (!feature) return;
         map.getCanvas().style.cursor = "pointer";
         const props = feature.properties ?? {};
-        popup
-          .setLngLat(event.lngLat)
-          .setText(`Team ${props.team}: ${props.label} (${props.minutes} min, ${props.doors} doors)`)
-          .addTo(map);
+        // The blockface label already carries doors and minutes.
+        popup.setLngLat(event.lngLat).setText(`Team ${props.team}: ${props.label}`).addTo(map);
       });
       map.on("mouseleave", "territories-lines", () => {
         map.getCanvas().style.cursor = "";
