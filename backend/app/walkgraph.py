@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -101,6 +102,10 @@ class WalkGraph:
 
     def __init__(self, ways: list[WalkWay]) -> None:
         self.graph = nx.Graph()
+        # The graph is shared across requests and route()/distances_from()
+        # temporarily inject sentinel nodes into it, so the mutating regions
+        # must not overlap (the sync API endpoints run in a thread pool).
+        self._lock = threading.Lock()
         self._grid: dict[tuple[int, int], list[tuple[NodeKey, NodeKey]]] = defaultdict(list)
         seen: set[tuple[NodeKey, NodeKey]] = set()
         for way in ways:
@@ -190,21 +195,22 @@ class WalkGraph:
         src: NodeKey = (math.nan, 0.0)  # never collides with a real coordinate
         dst: NodeKey = (math.nan, 1.0)
         graph = self.graph
-        try:
-            graph.add_edge(src, start.a, weight=start.to_a_m)
-            graph.add_edge(src, start.b, weight=start.to_b_m)
-            graph.add_edge(dst, end.a, weight=end.to_a_m)
-            graph.add_edge(dst, end.b, weight=end.to_b_m)
-            if start.edge == end.edge:
-                along = abs(start.to_a_m - end.to_a_m)
-                graph.add_edge(src, dst, weight=along)
+        with self._lock:
             try:
-                network_m, path = nx.bidirectional_dijkstra(graph, src, dst, weight="weight")
-            except nx.NetworkXNoPath:
-                return None
-        finally:
-            graph.remove_node(src)
-            graph.remove_node(dst)
+                graph.add_edge(src, start.a, weight=start.to_a_m)
+                graph.add_edge(src, start.b, weight=start.to_b_m)
+                graph.add_edge(dst, end.a, weight=end.to_a_m)
+                graph.add_edge(dst, end.b, weight=end.to_b_m)
+                if start.edge == end.edge:
+                    along = abs(start.to_a_m - end.to_a_m)
+                    graph.add_edge(src, dst, weight=along)
+                try:
+                    network_m, path = nx.bidirectional_dijkstra(graph, src, dst, weight="weight")
+                except nx.NetworkXNoPath:
+                    return None
+            finally:
+                graph.remove_node(src)
+                graph.remove_node(dst)
         via = [node for node in path if node not in (src, dst)]
         points: list[Point] = [origin, start.point, *via, end.point, destination]
         return WalkRoute(points=points, distance_m=start.offset_m + network_m + end.offset_m)
@@ -223,14 +229,15 @@ class WalkGraph:
             return {}
         src: NodeKey = (math.nan, 0.0)
         graph = self.graph
-        try:
-            graph.add_edge(src, start.a, weight=start.to_a_m)
-            graph.add_edge(src, start.b, weight=start.to_b_m)
-            dist = nx.single_source_dijkstra_path_length(
-                graph, src, cutoff=cutoff_m, weight="weight"
-            )
-        finally:
-            graph.remove_node(src)
+        with self._lock:
+            try:
+                graph.add_edge(src, start.a, weight=start.to_a_m)
+                graph.add_edge(src, start.b, weight=start.to_b_m)
+                dist = nx.single_source_dijkstra_path_length(
+                    graph, src, cutoff=cutoff_m, weight="weight"
+                )
+            finally:
+                graph.remove_node(src)
         result: dict[str, float] = {}
         for osm_id, snap in snaps.items():
             best = math.inf
