@@ -96,8 +96,13 @@ def empty_client(tmp_path: Path):
     return TestClient(create_app(snapshot_path=tmp_path / "missing.json.gz"))
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def real_snapshot() -> DistrictSnapshot:
+    """The real 28,534-address extract, loaded once and treated as read-only.
+
+    Session-scoped because loading and deriving stops, blockfaces and the walk
+    graph from it costs seconds; no test may mutate it.
+    """
     path = load_settings().snapshot_path
     if not path.exists():
         pytest.skip(f"no cached district snapshot at {path}; run `make fetch-district`")

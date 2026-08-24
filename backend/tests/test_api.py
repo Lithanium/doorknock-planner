@@ -17,7 +17,15 @@ def test_health_reports_the_cached_district(client):
 
 @pytest.mark.parametrize(
     "path",
-    ["/api/district", "/api/addresses", "/api/coverage", "/api/geocode?q=x", "/api/reverse?lat=0&lon=0"],
+    [
+        "/api/district",
+        "/api/addresses",
+        "/api/stops",
+        "/api/blockfaces",
+        "/api/coverage",
+        "/api/geocode?q=x",
+        "/api/reverse?lat=0&lon=0",
+    ],
 )
 def test_endpoints_explain_how_to_fetch_the_snapshot_when_it_is_missing(empty_client, path):
     response = empty_client.get(path)
@@ -63,6 +71,75 @@ def test_addresses_rejects_a_malformed_bbox(client):
     assert response.status_code == 400
 
 
+def test_stops_collapse_the_address_list(client):
+    body = client.get("/api/stops").json()
+    assert body["type"] == "FeatureCollection"
+    assert body["count"] == 7
+    assert body["doors"] == 9
+    assert body["truncated"] is False
+
+
+def test_stops_carry_door_counts_and_dwell(client):
+    body = client.get("/api/stops").json()
+    brenbeal = next(
+        f for f in body["features"] if f["properties"]["street"] == "Brenbeal Street"
+    )
+    assert brenbeal["properties"]["door_count"] == 3
+    assert brenbeal["properties"]["dwell_minutes"] > 0
+    assert "gated_candidate" not in brenbeal["properties"]
+    assert brenbeal["geometry"]["coordinates"][0] == pytest.approx(145.0510, abs=1e-3)
+
+
+def test_stops_can_be_filtered_to_a_bbox(client):
+    body = client.get("/api/stops", params={"bbox": "-37.81,145.04,-37.79,145.06"}).json()
+    assert body["count"] == 6
+    assert all("Outside" not in f["properties"]["street"] for f in body["features"])
+
+
+def test_stops_reject_a_malformed_bbox(client):
+    assert client.get("/api/stops", params={"bbox": "1,2"}).status_code == 400
+
+
+def test_stops_report_truncation(client):
+    body = client.get("/api/stops", params={"limit": 2}).json()
+    assert body["count"] == 2
+    assert body["truncated"] is True
+
+
+def test_blockfaces_return_drawable_runs_of_work(client):
+    body = client.get("/api/blockfaces").json()
+    assert body["type"] == "FeatureCollection"
+    assert body["count"] > 0
+    assert body["doors"] == 9
+    assert body["minutes"] > 0
+    feature = body["features"][0]
+    assert feature["geometry"]["type"] == "MultiLineString"
+    assert feature["properties"]["stops"] >= 1
+    assert feature["properties"]["side"] in ("even", "odd", "both")
+    assert feature["properties"]["stop_ids"]
+
+
+def test_blockfaces_can_be_filtered_to_one_street(client):
+    body = client.get("/api/blockfaces", params={"street": "Yerrin St"}).json()
+    assert body["count"] >= 1
+    assert {f["properties"]["street"] for f in body["features"]} == {"Yerrin Street"}
+
+
+def test_blockfaces_can_be_filtered_to_a_bbox(client):
+    body = client.get("/api/blockfaces", params={"bbox": "-37.81,145.04,-37.79,145.06"}).json()
+    assert 0 < body["count"] <= client.get("/api/blockfaces").json()["count"]
+
+
+def test_blockfaces_account_for_every_stop_exactly_once(client):
+    stop_ids = {f["id"] for f in client.get("/api/stops").json()["features"]}
+    assigned = [
+        stop_id
+        for f in client.get("/api/blockfaces").json()["features"]
+        for stop_id in f["properties"]["stop_ids"]
+    ]
+    assert sorted(assigned) == sorted(stop_ids)
+
+
 def test_coverage_includes_the_effort_estimate(client):
     body = client.get("/api/coverage").json()
     assert body["doors"] == 9
@@ -70,6 +147,13 @@ def test_coverage_includes_the_effort_estimate(client):
     assert body["multi_unit_stops"] == 1
     assert body["cluster_histogram"] == {"1": 6, "3": 1}
     assert body["effort"]["doors_per_pair_session"] > 0
+
+
+def test_coverage_reports_blockfaces_and_knock_hours(client):
+    body = client.get("/api/coverage").json()
+    assert body["blockfaces"] == client.get("/api/blockfaces").json()["count"]
+    assert body["knock_hours"] > 0
+    assert body["uncapped_knock_hours"] >= body["knock_hours"]
 
 
 def test_geocode_returns_candidates_with_a_district_containment_flag(client):
@@ -135,6 +219,15 @@ def test_hub_preview_reports_walking_reachability(client):
     assert 0 < walk["doors_within"] <= body["doors_within"]
     assert walk["stops_within"] <= body["stops_within"]
     assert walk["minutes_to_farthest"] >= 0
+
+
+def test_hub_preview_reports_blockfaces_and_knocking_hours(client):
+    body = client.get(
+        "/api/hub/preview", params={"lat": -37.800, "lon": 145.050, "radius_m": 800}
+    ).json()
+    walk = body["walk"]
+    assert walk["blockfaces_within"] > 0
+    assert walk["knock_hours"] > 0
 
 
 def test_walk_route_returns_geometry_and_minutes(client):

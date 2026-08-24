@@ -5,7 +5,9 @@
       "Exec(mkdir)",
       "Exec(../.venv/bin/python)",
       "Exec(.venv/bin/python)",
-      "Exec(grep)"
+      "Exec(grep)",
+      "Exec(cd)",
+      "Exec(make test)"
     ]
   }
 }

@@ -10,14 +10,15 @@ is proven to work**.
 | 0 | Skeleton you can run | **Done** |
 | 1 | Real map data + hub picker, proven trustworthy | **Done** |
 | 2 | Real walking distances | **Done** |
-| 3a | Collapse multi-unit clusters into stops | Not started |
-| 3 | Blockfaces (the "human element", part 1) | Not started |
+| 3a | Collapse multi-unit clusters into stops | **Done** |
+| 3 | Blockfaces (the "human element", part 1) | **Backend done**, UI pending |
 | 4 | Territories for N teams | Not started |
 | 5 | Routing with pamphlet capacity and priority | Not started |
 | 6 | Volunteer interface | Not started |
 | 7 | Field hardening | Not started |
 
-Current state: **176 backend tests + clean frontend typecheck and build.**
+Current state: **294 backend tests + clean frontend typecheck.** Phase 3 has no
+map UI yet: `/api/blockfaces` serves drawable geometry, but nothing renders it.
 
 ---
 
@@ -105,11 +106,11 @@ planner makes no external calls at all.
    geocoder was averaging them into a meaningless midpoint; it now returns
    each location separately, labelled by nearest cross-street.
 
-### Open question for the campaign
+### Open question for the campaign — answered in Phase 3a
 
 59 stops have 8+ doors and **378 Cotham Road alone has 95**. These are likely
-apartment blocks with locked lobbies. Decide whether Phase 3 excludes them by
-default or includes them with a manual skip. **Not yet answered.**
+apartment blocks with locked lobbies. **Answered:** include them, but charge a
+capped dwell rather than 95 walk-ups. See Phase 3a below.
 
 ---
 
@@ -167,30 +168,139 @@ computed on demand (`single_source_dijkstra_path_length` with a cutoff).
 
 ---
 
-## Phase 3a — Collapse multi-unit clusters into stops
+## Phase 3a — Collapse multi-unit clusters into stops (Done)
 
-Turn 28,534 doors into ~24,366 stops, each carrying `door_count` and
-`dwell = approach + per_door x N`, flagging 8+ door clusters as probable gated
-complexes. Groundwork exists: `geocode.spatial_clusters` and the coverage
-report already compute this.
+**28,534 doors become 24,366 stops.** A stop is one place a pair physically
+walks up to; every door behind it rides along. Routing over doors would invent
+travel time between addresses that share a coordinate.
 
-**Verify:** 378 Cotham Road appears as one stop with 95 doors and a dwell of
-roughly two hours; 2A Kireep Road as one stop with 25.
+### Built
+
+| File | Role |
+| ---- | ---- |
+| `backend/app/stops.py` | `Stop`, `build_stops`, `dwell_seconds`, `sort_key`; `stop_groups` moved here from `coverage.py` |
+| `backend/app/services.py` | Lazy `stops` on the snapshot store |
+| `backend/app/api/routes.py` | `GET /api/stops`; `hub/preview` counts stops and knocking hours |
+| `backend/app/cli.py` | `report` prints blockface and knocking-hour lines |
+
+### The gated-block decision
+
+Include them, but **cap the dwell**: a 95-door tower is one buzzer panel, not
+95 walk-ups. `dwell = approach + per_door x min(doors, 8)`, so 378 Cotham Road
+costs 10.5 planning minutes instead of two hours. Capping *at* the 8-door gated
+threshold makes dwell continuous — a 7-door stop and an 8-door stop cost almost
+the same — so no stop becomes artificially attractive by having one fewer door.
+`Stop.uncapped_dwell_seconds` keeps the honest figure, and the API exposes it
+on every gated stop.
+
+### Verified
+
+- 378 Cotham Road: **one stop, 95 doors**, 10.5 min capped / **119 min
+  uncapped** — the original "roughly two hours" figure, now labelled as such.
+- 2A Kireep Road: **one stop, 25 doors**.
+- Every door lands in exactly one stop; stop ids are stable when the snapshot
+  is reordered (keyed on the lowest OSM id in the group, not on iteration
+  order); no multi-unit stop spreads more than 200 m.
 
 ---
 
-## Phase 3 — Blockfaces (the human element)
+## Phase 3 — Blockfaces (Done, backend only)
 
-Group stops into blockfaces: same street, same side, contiguous numbers,
-between two intersections. Decide both-sides-in-one-pass versus one-side-per-
-pass from road class and width. Blockfaces become **atomic** so the router can
-never zigzag across a street.
+**24,366 stops become 2,760 blockfaces**, the atomic units of work. Median 9
+doors / 17 min, so a 3-hour pair-session is roughly ten of them.
 
-> **Carry-over from Phase 1:** blockface keys must be street name **plus
-> spatial cluster**, never name alone, or the two Mary Streets merge.
+### How a blockface is found
 
-**Verify:** the map colours each blockface with a sidebar listing
-`Smith St (even) #2-#48 - 24 doors - 11 min`. Eyeball against streets you know.
+1. Every named walkable way is cut at its **intersections** — nodes shared with
+   a *differently named* street. Unnamed footpaths and driveways are ignored,
+   or every driveway in Kew would start a new blockface. This yields **2,557
+   spans across 801 named streets**.
+2. Each stop attaches to the nearest span *of its own street*, within 300 m.
+3. Each span splits by side: **one blockface per side on arterials**, both
+   sides together on quiet streets (the "minimise crossings on busy streets"
+   rule — `primary`/`secondary`/`trunk`, or 4+ lanes, or 60 km/h+).
+4. Runs longer than **45 minutes** are cut into contiguous parts in
+   house-number order.
+
+The Phase 1 carry-over is satisfied structurally rather than by convention:
+span ids are derived from the span's own coordinates, so the two Mary Streets
+can never share one however their names are spelled.
+
+### Why blockfaces are capped at 45 minutes
+
+Between-intersection runs alone left **265 blockfaces holding 10,563 doors —
+37% of the district — in units of over 45 minutes**, topping out at Wiltshire
+Drive's single 274-minute run, half again longer than a whole session. A unit
+that big cannot be given to a team without blowing the budget. Splitting in
+house-number order preserves everything atomicity exists to protect: one
+street, one side, no zigzag, no street half-done by accident. p100 fell from
+274 to 52 minutes.
+
+### Built
+
+| File | Role |
+| ---- | ---- |
+| `backend/app/blockface.py` | `StreetNetwork` (spans between intersections), `Blockface`, `is_busy`, `parity`, `split_into_parts` |
+| `backend/app/walkgraph.py` | `node_key` / `project_to_segment` promoted from private, now shared |
+| `backend/app/coverage.py` | Report gains blockface counts and knocking hours |
+| `backend/app/api/routes.py` | `GET /api/blockfaces` (drawable `MultiLineString` + stop ids), street and bbox filters |
+
+### Verified
+
+- **294 backend tests** (66 new `test_blockface`, 23 new `test_stops`, 22 new
+  real-snapshot, 12 new API, 2 new offline, 2 new services).
+- Against the real extract: every one of the 24,366 stops lands in exactly one
+  blockface, all 28,534 doors are accounted for, ids are unique, no blockface
+  is empty, none mixes two streets, none spans more than 1 km end to end.
+- Cotham Road becomes **56 blockfaces**, not one; every arterial blockface is
+  marked one-side-per-pass; 90%+ of quiet residential runs are walked both
+  sides at once.
+- Labels read as intended: `Cotham Road (even) #2 to #30-38 - 13 doors - 23 min`.
+- `/api/stops` 5.5 MB in 240 ms; `/api/blockfaces` 2.4 MB in 640 ms.
+
+### Three bugs found
+
+1. **Off-network blockfaces on arterials were marked zigzag-friendly.** Burke
+   Road and Cotham Road have addresses inside the district whose carriageway is
+   clipped out of the extract, so those stops fell back to a spatial-cluster
+   blockface — which had no road tags and therefore looked like a quiet street.
+   Volunteers would have been routed back and forth across an arterial. A
+   fallback now inherits its street's class from any surviving way of that
+   name, and a street with **no** geometry at all (Canterbury Road, 81 doors)
+   is assumed busy: the cost of being wrong that way is a slightly inefficient
+   route, against sending a pair across four lanes in the other.
+2. **The 150 m street-match radius was too tight.** It dropped 349 stops onto
+   the fallback path, including Wiltshire Drive at 152 m. Measured: 98% of
+   stops sit within 89 m of their own street's centreline and the tail flattens
+   past 300 m, which is already `walkgraph.MAX_SNAP_DISTANCE_M`. Aligning the
+   two cut off-network doors from 626 to **459 (1.6%)**, all of them on clipped
+   boundary roads.
+3. **Two blocks of one street could silently merge into a single blockface.**
+   Span ids were keyed on the span's lowest coordinate, but adjacent spans
+   *share* the intersection node between them — so a V-shaped street whose
+   junction sits at the bottom of the V gives both its spans the same anchor.
+   Found by reasoning about the id scheme rather than by a failing test, then
+   reproduced. It was live, not theoretical: fixing it recovered **3 real
+   blockfaces** in Kew (2,757 -> 2,760). Ids now carry a suffix on collision,
+   and spans are ordered by their lowest *edge*, which adjacent spans can
+   never share.
+
+### Open question for the campaign
+
+The stop model puts full district coverage at **792 knocking hours**, against
+the **594 h** implied by the existing 75 s/door headline. The gap is the 30 s
+per-stop approach cost, which a per-door estimate never charged. Both figures
+are reported (`knock_hours`, and `estimate_effort` unchanged) rather than one
+silently overriding the other. `APPROACH_SECONDS` and `PER_DOOR_SECONDS` are
+constants in `stops.py`; **calibrate them against a real session before Phase 5
+uses them as routing costs.**
+
+### Still to do for Phase 3
+
+The map UI. `/api/blockfaces` returns per-blockface geometry, a label and its
+stop ids, but nothing draws them yet. Original acceptance criterion stands:
+colour each blockface on the map with a sidebar list, and eyeball it against
+streets you know.
 
 ---
 
@@ -198,7 +308,8 @@ never zigzag across a street.
 
 Balanced, **contiguous** partitioning of blockfaces into N territories weighted
 by workload minutes, seeded outward from the hub, with no street split between
-teams.
+teams. `Blockface.minutes` is the weight to balance on, and blockfaces are now
+small enough (median 17 min, max 52) for a ~10% balance to be achievable.
 
 **Verify:** teams 1-8 produce N contiguous colour-coded areas with per-team
 minutes within ~10%; no blockface in two territories (asserted).

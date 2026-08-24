@@ -70,23 +70,63 @@ test` works on a fresh clone.
   Streets 5.8 km apart and two Henry Streets 5.0 km apart; 203 of the stops
   have records more than 150 m apart. Genuine multi-unit blocks never spread
   beyond 147 m (median 29 m), so 200 m single-link clustering separates the two
-  cases cleanly. **Phase 3 blockface grouping must key on street name *plus*
-  spatial cluster, not name alone.**
+  cases cleanly. Blockface grouping must key on street name *plus* spatial
+  cluster, never name alone — `blockface.py` gets this structurally, by
+  deriving each span's id from the span's own coordinates.
+- **A T-junction splits the street it runs into, not only the street that
+  ends.** Both sides of the junction node become separate blocks. Correct, and
+  surprising the first time you assert otherwise in a test.
+- **Adjacent spans of one street share the intersection node between them**,
+  so a span id keyed on "lowest coordinate in the span" is not unique: a
+  V-shaped street with the junction at the bottom of the V gives both spans the
+  same anchor and merges two blocks. Three real Kew blockfaces were lost this
+  way. Ids are deduped with a suffix and spans ordered by lowest *edge*, which
+  adjacent spans can never share.
+- **A blockface must inherit its street's road class even when the geometry is
+  missing.** Boundary roads (Burke, Barkers, Canterbury) have addresses inside
+  the district but carriageway outside it, so their stops fall back to
+  cluster-grouping. A fallback carrying no road tags looks like a quiet street
+  and will happily route a pair back and forth across four lanes. Streets with
+  no geometry at all are assumed busy on purpose.
 - **House numbers can be ranges** (`31-37 Harp Road`). Index both the full
-  range and its leading number.
+  range and its leading number. They also turn up as blockface endpoints, where
+  `#2-#30-38` is unreadable and has to be rendered `#2 to #30-38`.
 - **Suburb name ordering matters at street level.** Suburb-only lookups for
   "North Balwyn" and "Balwyn North" agree, but `Doncaster Road, North Balwyn`
   and `Doncaster Road, Balwyn North` resolve **1.6 km apart** via Nominatim.
   This is why geocoding is done locally against the district's own addresses.
 - **Multi-unit stops are a big workload factor**: 4,441 doors carry a unit
-  number, 1,759 stops have more than one door, 59 stops have 8+ doors, and
-  378 Cotham Road alone has 95. A stop is not a door.
+  number, **1,592** stops have more than one door, 59 stops have 8+ doors, and
+  378 Cotham Road alone has 95. A stop is not a door. (An earlier note here
+  said 1,759; that was never what the code produced. Re-measured 2026-08-24.)
+- **811 named walkable ways carry 801 distinct street names**, which cut into
+  **2,557 spans** between intersections and then **2,760 blockfaces** (median
+  9 doors / 17 min). 15 streets have addresses but no named way at all;
+  459 doors (1.6%) sit further than 300 m from any way of their own street,
+  almost all on boundary roads whose carriageway is clipped out of the extract.
+- Every address starts with a digit, so even/odd side-of-street parity never
+  has to guess. The split is near-even: 14,203 even, 14,331 odd.
+- 1,227 ways tag `maxspeed` (683 are 50, 433 are 60) and 772 tag `lanes`,
+  which is enough to classify arterials without guessing from road class alone.
 
 ## Throughput reality
 
 ~93 doors per pair per 3-hour session (75 s/door, 35% walking overhead), so
 full district coverage is ~307 pair-sessions. Prioritisation is therefore the
 most valuable feature, not a fallback for running out of pamphlets.
+
+**Two dwell models coexist and disagree; neither is calibrated.**
+`estimate_effort` charges 75 s per door and implies 594 knocking hours for the
+district. `stops.dwell_seconds` charges 30 s per *stop* plus 75 s per door,
+which the per-door model never billed for, and reports 792 hours. Both are
+served (`effort` and `knock_hours` on `/api/coverage`) rather than one quietly
+winning. `APPROACH_SECONDS` and `PER_DOOR_SECONDS` live in `stops.py` — time a
+real session and fix them before Phase 5 turns them into routing costs.
+
+Gated blocks are charged a capped dwell: `approach + per_door x min(doors, 8)`,
+so 378 Cotham Road costs 10.5 min, not 2 hours. The cap sits exactly at the
+8-door gated threshold so dwell stays continuous and no stop is made cheap by
+losing one door. `Stop.uncapped_dwell_seconds` keeps the real figure.
 
 ## Remaining external dependency
 

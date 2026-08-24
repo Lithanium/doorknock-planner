@@ -22,7 +22,7 @@ _NODE_PRECISION = 7
 NodeKey = tuple[float, float]
 
 
-def _node_key(point: Point) -> NodeKey:
+def node_key(point: Point) -> NodeKey:
     return (round(point[0], _NODE_PRECISION), round(point[1], _NODE_PRECISION))
 
 
@@ -74,7 +74,7 @@ class WalkRoute:
 _M_PER_DEG = 111_320.0
 
 
-def _project_to_segment(p: Point, a: Point, b: Point) -> tuple[Point, float]:
+def project_to_segment(p: Point, a: Point, b: Point) -> tuple[Point, float]:
     """Nearest point on segment a-b to p, in a local equirectangular frame.
 
     Returns (snap point, distance in metres). The flat-earth approximation is
@@ -112,7 +112,7 @@ class WalkGraph:
             if not is_walkable(way):
                 continue
             for a, b in zip(way.geometry, way.geometry[1:]):
-                ka, kb = _node_key(a), _node_key(b)
+                ka, kb = node_key(a), node_key(b)
                 if ka == kb:
                     continue
                 weight = haversine_m(ka, kb)
@@ -158,7 +158,7 @@ class WalkGraph:
                         if (a, b) in seen:
                             continue
                         seen.add((a, b))
-                        point, offset = _project_to_segment((lat, lon), a, b)
+                        point, offset = project_to_segment((lat, lon), a, b)
                         if best is None or offset < best[0]:
                             best = (offset, point, a, b)
             # Every unexplored segment lies beyond ring `ring`, i.e. at least

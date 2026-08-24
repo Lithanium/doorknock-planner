@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.coverage import estimate_effort, stop_groups
+from app.coverage import estimate_effort
+from app.geocode import normalise_street
 from app.osm.boundary import haversine_m, rings_to_geojson
 from app.services import SnapshotMissingError, SnapshotStore
+from app.stops import build_stops
 from app.walkgraph import WALKING_SPEED_M_PER_MIN
 
 router = APIRouter(prefix="/api")
@@ -12,6 +14,16 @@ router = APIRouter(prefix="/api")
 
 def _store(request: Request) -> SnapshotStore:
     return request.app.state.store
+
+
+def _parse_bbox(bbox: str) -> tuple[float, float, float, float]:
+    try:
+        south, west, north, east = (float(v) for v in bbox.split(","))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="bbox must be south,west,north,east"
+        ) from exc
+    return south, west, north, east
 
 
 def _require_snapshot(request: Request):
@@ -61,10 +73,7 @@ def addresses(
     snapshot = _require_snapshot(request)
     selected = snapshot.addresses
     if bbox:
-        try:
-            south, west, north, east = (float(v) for v in bbox.split(","))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="bbox must be south,west,north,east") from exc
+        south, west, north, east = _parse_bbox(bbox)
         selected = [
             a for a in selected if south <= a.lat <= north and west <= a.lon <= east
         ]
@@ -82,6 +91,86 @@ def addresses(
                 "properties": {"label": a.label, "street": a.street, "number": a.number},
             }
             for a in selected
+        ],
+    }
+
+
+@router.get("/stops")
+def stops(
+    request: Request,
+    bbox: str | None = Query(default=None, description="south,west,north,east"),
+    limit: int = Query(default=40_000, ge=1, le=100_000),
+) -> dict:
+    """Doors collapsed into the places a pair actually walks up to."""
+    _require_snapshot(request)
+    selected = _store(request).stops
+    if bbox:
+        south, west, north, east = _parse_bbox(bbox)
+        selected = [
+            s for s in selected if south <= s.lat <= north and west <= s.lon <= east
+        ]
+    truncated = len(selected) > limit
+    selected = selected[:limit]
+    return {
+        "type": "FeatureCollection",
+        "truncated": truncated,
+        "count": len(selected),
+        "doors": sum(s.door_count for s in selected),
+        "features": [
+            {
+                "type": "Feature",
+                "id": s.stop_id,
+                "geometry": {"type": "Point", "coordinates": [s.lon, s.lat]},
+                "properties": s.to_dict(),
+            }
+            for s in selected
+        ],
+    }
+
+
+@router.get("/blockfaces")
+def blockfaces(
+    request: Request,
+    bbox: str | None = Query(default=None, description="south,west,north,east"),
+    street: str | None = Query(default=None, description="filter to one street name"),
+    limit: int = Query(default=5_000, ge=1, le=20_000),
+) -> dict:
+    """The atomic units of work: one street, one side, one block."""
+    _require_snapshot(request)
+    selected = _store(request).blockfaces
+    if street:
+        wanted = normalise_street(street)
+        selected = [b for b in selected if normalise_street(b.street) == wanted]
+    if bbox:
+        south, west, north, east = _parse_bbox(bbox)
+        selected = [
+            b
+            for b in selected
+            if south <= b.centroid[0] <= north and west <= b.centroid[1] <= east
+        ]
+    truncated = len(selected) > limit
+    selected = selected[:limit]
+    return {
+        "type": "FeatureCollection",
+        "truncated": truncated,
+        "count": len(selected),
+        "doors": sum(b.door_count for b in selected),
+        "minutes": round(sum(b.minutes for b in selected), 1),
+        "features": [
+            {
+                "type": "Feature",
+                "id": b.blockface_id,
+                "geometry": {
+                    "type": "MultiLineString",
+                    "coordinates": [[[lon, lat] for lat, lon in chain] for chain in b.path],
+                },
+                "properties": {
+                    **b.to_dict(),
+                    "centroid": [b.centroid[1], b.centroid[0]],
+                    "stop_ids": [s.stop_id for s in b.stops],
+                },
+            }
+            for b in selected
         ],
     }
 
@@ -136,25 +225,34 @@ def hub_preview(
     snapshot = _require_snapshot(request)
     store = _store(request)
     within = [a for a in snapshot.addresses if haversine_m((lat, lon), a.point) <= radius_m]
-    stops = stop_groups(within)
+    stops_within = [s for s in store.stops if haversine_m((lat, lon), s.point) <= radius_m]
     nearest = store.geocoder.nearest(lat, lon)
 
     walk_m = store.walk_graph.distances_from((lat, lon), store.address_snaps, radius_m)
     walkable = [a for a in snapshot.addresses if a.osm_id in walk_m]
+    walkable_stops = [
+        s for s in store.stops if any(d.osm_id in walk_m for d in s.doors)
+    ]
+    reachable_ids = {s.stop_id for s in walkable_stops}
+    walkable_faces = [
+        b for b in store.blockfaces if any(s.stop_id in reachable_ids for s in b.stops)
+    ]
     return {
         "lat": lat,
         "lon": lon,
         "radius_m": radius_m,
         "inside_district": snapshot.contains((lat, lon)),
         "doors_within": len(within),
-        "stops_within": len(stops),
+        "stops_within": len(stops_within),
         "streets_within": len({a.street for a in within}),
         "nearest_address": nearest.label if nearest else None,
         "effort": estimate_effort(len(within)),
         "walk": {
             "doors_within": len(walkable),
-            "stops_within": len(stop_groups(walkable)),
+            "stops_within": len(walkable_stops),
             "streets_within": len({a.street for a in walkable}),
+            "blockfaces_within": len(walkable_faces),
+            "knock_hours": round(sum(s.dwell_seconds for s in walkable_stops) / 3600, 1),
             "minutes_to_farthest": round(max(walk_m.values()) / WALKING_SPEED_M_PER_MIN, 1)
             if walk_m
             else 0.0,

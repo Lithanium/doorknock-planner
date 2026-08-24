@@ -3,9 +3,11 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+from app.blockface import Blockface, build_blockfaces
 from app.coverage import CoverageReport, build_coverage_report
 from app.geocode import LocalGeocoder
 from app.osm.snapshot import DistrictSnapshot
+from app.stops import Stop, build_stops
 from app.walkgraph import EdgeSnap, WalkGraph
 
 
@@ -34,6 +36,8 @@ class SnapshotStore:
         self._coverage: CoverageReport | None = None
         self._walk_graph: WalkGraph | None = None
         self._address_snaps: dict[str, EdgeSnap] | None = None
+        self._stops: list[Stop] | None = None
+        self._blockfaces: list[Blockface] | None = None
         self._loaded_mtime: float | None = None
 
     @property
@@ -60,6 +64,24 @@ class SnapshotStore:
             if self._coverage is None:
                 self._coverage = build_coverage_report(snapshot)
             return self._coverage
+
+    @property
+    def stops(self) -> list[Stop]:
+        with self._lock:
+            snapshot = self._snapshot_locked()
+            if self._stops is None:
+                self._stops = build_stops(snapshot.addresses)
+            return self._stops
+
+    @property
+    def blockfaces(self) -> list[Blockface]:
+        with self._lock:
+            snapshot = self._snapshot_locked()
+            if self._stops is None:
+                self._stops = build_stops(snapshot.addresses)
+            if self._blockfaces is None:
+                self._blockfaces = build_blockfaces(self._stops, snapshot.ways)
+            return self._blockfaces
 
     @property
     def walk_graph(self) -> WalkGraph:
@@ -100,4 +122,6 @@ class SnapshotStore:
         self._coverage = None
         self._walk_graph = None
         self._address_snaps = None
+        self._stops = None
+        self._blockfaces = None
         self._loaded_mtime = None

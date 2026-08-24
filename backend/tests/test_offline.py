@@ -63,6 +63,18 @@ def test_all_addresses_serve_offline(offline_client):
     assert body["truncated"] is False
 
 
+def test_all_stops_serve_offline(offline_client):
+    body = offline_client.get("/api/stops").json()
+    assert body["count"] > 20_000
+    assert body["doors"] > body["count"]
+
+
+def test_blockfaces_serve_offline(offline_client):
+    body = offline_client.get("/api/blockfaces", params={"limit": 20_000}).json()
+    assert body["count"] > 1_000
+    assert body["truncated"] is False
+
+
 def test_coverage_report_works_offline(offline_client):
     body = offline_client.get("/api/coverage").json()
     assert body["addresses_missing_street"] == 0

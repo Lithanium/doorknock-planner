@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 
-from app.geocode import spatial_clusters
+from app.blockface import build_blockfaces
 from app.osm.boundary import haversine_m, ring_is_closed
-from app.osm.snapshot import Address, DistrictSnapshot
-
-GATED_COMPLEX_DOOR_THRESHOLD = 8
-"""A street number with this many doors is likely a gated block needing a human call."""
+from app.osm.snapshot import DistrictSnapshot
+from app.stops import GATED_COMPLEX_DOOR_THRESHOLD, build_stops
 
 
 @dataclass
@@ -23,6 +21,11 @@ class CoverageReport:
     gated_complex_candidates: int
     largest_stops: list[dict] = field(default_factory=list)
     cluster_histogram: dict[int, int] = field(default_factory=dict)
+    blockfaces: int = 0
+    blockfaces_one_side_per_pass: int = 0
+    blockfaces_off_network: int = 0
+    knock_hours: float = 0.0
+    uncapped_knock_hours: float = 0.0
     addresses_missing_street: int = 0
     walkable_ways: dict[str, int] = field(default_factory=dict)
     boundary_rings: int = 0
@@ -43,6 +46,11 @@ class CoverageReport:
             "gated_complex_candidates": self.gated_complex_candidates,
             "largest_stops": self.largest_stops,
             "cluster_histogram": {str(k): v for k, v in sorted(self.cluster_histogram.items())},
+            "blockfaces": self.blockfaces,
+            "blockfaces_one_side_per_pass": self.blockfaces_one_side_per_pass,
+            "blockfaces_off_network": self.blockfaces_off_network,
+            "knock_hours": self.knock_hours,
+            "uncapped_knock_hours": self.uncapped_knock_hours,
             "addresses_missing_street": self.addresses_missing_street,
             "walkable_ways": dict(sorted(self.walkable_ways.items(), key=lambda kv: -kv[1])),
             "boundary_rings": self.boundary_rings,
@@ -53,29 +61,13 @@ class CoverageReport:
         }
 
 
-def stop_groups(addresses: list[Address]) -> list[list[Address]]:
-    """Groups doors into stops by street name, number *and* spatial cluster.
-
-    Street names are not unique within a district (two Mary Streets 5.8 km
-    apart), so a (street, number) key alone would merge doors from distinct
-    streets into one stop.
-    """
-    by_key: dict[tuple[str, str], list[Address]] = defaultdict(list)
-    for address in addresses:
-        by_key[(address.street, address.number)].append(address)
-    return [
-        cluster
-        for group in by_key.values()
-        for cluster in (spatial_clusters(group) if len(group) > 1 else [group])
-    ]
-
-
 def build_coverage_report(snapshot: DistrictSnapshot) -> CoverageReport:
     addresses = snapshot.addresses
-    stops = stop_groups(addresses)
+    stops = build_stops(addresses)
+    blockfaces = build_blockfaces(stops, snapshot.ways)
 
-    sizes = Counter(len(group) for group in stops)
-    largest = sorted(stops, key=len, reverse=True)[:8]
+    sizes = Counter(stop.door_count for stop in stops)
+    largest = sorted(stops, key=lambda s: s.door_count, reverse=True)[:8]
     street_doors = Counter(a.street for a in addresses)
     south, west, north, east = snapshot.bbox
 
@@ -86,15 +78,17 @@ def build_coverage_report(snapshot: DistrictSnapshot) -> CoverageReport:
         stops=len(stops),
         streets=len(street_doors),
         doors_with_unit=sum(1 for a in addresses if a.unit),
-        multi_unit_stops=sum(1 for group in stops if len(group) > 1),
-        gated_complex_candidates=sum(
-            1 for group in stops if len(group) >= GATED_COMPLEX_DOOR_THRESHOLD
-        ),
+        multi_unit_stops=sum(1 for stop in stops if stop.door_count > 1),
+        gated_complex_candidates=sum(1 for stop in stops if stop.is_gated_candidate),
         largest_stops=[
-            {"street": group[0].street, "number": group[0].number, "doors": len(group)}
-            for group in largest
+            {"street": s.street, "number": s.number, "doors": s.door_count} for s in largest
         ],
         cluster_histogram=dict(sizes),
+        blockfaces=len(blockfaces),
+        blockfaces_one_side_per_pass=sum(1 for b in blockfaces if b.one_side_per_pass),
+        blockfaces_off_network=sum(1 for b in blockfaces if b.off_network),
+        knock_hours=round(sum(s.dwell_seconds for s in stops) / 3600, 1),
+        uncapped_knock_hours=round(sum(s.uncapped_dwell_seconds for s in stops) / 3600, 1),
         addresses_missing_street=sum(1 for a in addresses if not a.street),
         walkable_ways=dict(Counter(w.highway for w in snapshot.ways)),
         boundary_rings=len(snapshot.rings),
