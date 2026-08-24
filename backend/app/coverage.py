@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
+from app.geocode import spatial_clusters
 from app.osm.boundary import haversine_m, ring_is_closed
-from app.osm.snapshot import DistrictSnapshot
+from app.osm.snapshot import Address, DistrictSnapshot
 
 GATED_COMPLEX_DOOR_THRESHOLD = 8
 """A street number with this many doors is likely a gated block needing a human call."""
@@ -52,14 +53,29 @@ class CoverageReport:
         }
 
 
+def stop_groups(addresses: list[Address]) -> list[list[Address]]:
+    """Groups doors into stops by street name, number *and* spatial cluster.
+
+    Street names are not unique within a district (two Mary Streets 5.8 km
+    apart), so a (street, number) key alone would merge doors from distinct
+    streets into one stop.
+    """
+    by_key: dict[tuple[str, str], list[Address]] = defaultdict(list)
+    for address in addresses:
+        by_key[(address.street, address.number)].append(address)
+    return [
+        cluster
+        for group in by_key.values()
+        for cluster in (spatial_clusters(group) if len(group) > 1 else [group])
+    ]
+
+
 def build_coverage_report(snapshot: DistrictSnapshot) -> CoverageReport:
     addresses = snapshot.addresses
-    clusters: dict[tuple[str, str], list] = defaultdict(list)
-    for address in addresses:
-        clusters[(address.street, address.number)].append(address)
+    stops = stop_groups(addresses)
 
-    sizes = Counter(len(group) for group in clusters.values())
-    largest = sorted(clusters.items(), key=lambda kv: -len(kv[1]))[:8]
+    sizes = Counter(len(group) for group in stops)
+    largest = sorted(stops, key=len, reverse=True)[:8]
     street_doors = Counter(a.street for a in addresses)
     south, west, north, east = snapshot.bbox
 
@@ -67,16 +83,16 @@ def build_coverage_report(snapshot: DistrictSnapshot) -> CoverageReport:
         district_name=snapshot.district_name,
         fetched_at=snapshot.fetched_at,
         doors=len(addresses),
-        stops=len(clusters),
+        stops=len(stops),
         streets=len(street_doors),
         doors_with_unit=sum(1 for a in addresses if a.unit),
-        multi_unit_stops=sum(1 for group in clusters.values() if len(group) > 1),
+        multi_unit_stops=sum(1 for group in stops if len(group) > 1),
         gated_complex_candidates=sum(
-            1 for group in clusters.values() if len(group) >= GATED_COMPLEX_DOOR_THRESHOLD
+            1 for group in stops if len(group) >= GATED_COMPLEX_DOOR_THRESHOLD
         ),
         largest_stops=[
-            {"street": street, "number": number, "doors": len(group)}
-            for (street, number), group in largest
+            {"street": group[0].street, "number": group[0].number, "doors": len(group)}
+            for group in largest
         ],
         cluster_histogram=dict(sizes),
         addresses_missing_street=sum(1 for a in addresses if not a.street),

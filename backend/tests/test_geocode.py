@@ -52,7 +52,12 @@ def test_parse_query(query, expected):
 
 @pytest.mark.parametrize(
     ("number", "expected"),
-    [("22", ["22"]), ("247B", ["247b"]), ("31-37", ["3137", "31"])],
+    [
+        ("22", ["22"]),
+        ("247B", ["247b"]),
+        ("31-37", ["3137", "31", "33", "35", "37"]),
+        ("2-5", ["25", "2", "3", "4", "5"]),
+    ],
 )
 def test_number_keys_cover_ranges(number, expected):
     from app.geocode import number_keys
@@ -68,6 +73,20 @@ def test_ranged_house_number_matches_either_form():
         [Address(osm_id="n1", lat=-37.80, lon=145.03, number="31-37", street="Harp Road")]
     )
     for query in ("31-37 Harp Road", "31 Harp Road", "31-37 Harp Rd"):
+        candidates = ranged.search(query)
+        assert candidates, query
+        assert candidates[0].match_type == "exact", query
+        assert candidates[0].number == "31-37"
+
+
+def test_interior_of_a_range_matches_exactly():
+    """'35 Harp Road' is covered by the '31-37' frontage record."""
+    from app.osm.snapshot import Address
+
+    ranged = LocalGeocoder(
+        [Address(osm_id="n1", lat=-37.80, lon=145.03, number="31-37", street="Harp Road")]
+    )
+    for query in ("33 Harp Road", "35 Harp Road", "37 Harp Road"):
         candidates = ranged.search(query)
         assert candidates, query
         assert candidates[0].match_type == "exact", query

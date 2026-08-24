@@ -29,6 +29,20 @@ def test_report_flags_probable_gated_blocks(snapshot):
     assert report.gated_complex_candidates == 1
 
 
+def test_same_named_streets_far_apart_are_separate_stops(snapshot):
+    """The district has two Mary Streets 5.8 km apart; a (street, number) key
+    alone would merge '5 Mary Street' on both into one stop."""
+    from app.osm.snapshot import Address
+
+    snapshot.addresses += [
+        Address(osm_id="m1", lat=-37.792, lon=145.042, number="5", street="Mary Street"),
+        Address(osm_id="m2", lat=-37.808, lon=145.058, number="5", street="Mary Street"),
+    ]
+    report = build_coverage_report(snapshot)
+    assert report.stops == 9
+    assert report.multi_unit_stops == 1
+
+
 def test_report_summarises_the_walkable_network(snapshot):
     report = build_coverage_report(snapshot)
     assert report.walkable_ways == {"residential": 1, "primary": 1, "footway": 1}
