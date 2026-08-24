@@ -64,6 +64,10 @@ _UNIT_NUMBER_RE = re.compile(r"^\s*(?:(?:unit|apt|apartment|flat|u)\s*)?([0-9]+[
 _LEADING_UNIT_WORD_RE = re.compile(r"^\s*(?:unit|apt|apartment|flat)\s+([0-9]+[a-z]?)\s*,?\s*", re.I)
 _NUMBER_RE = re.compile(r"^\s*([0-9]+[a-z]?(?:\s*-\s*[0-9]+[a-z]?)?)\s*", re.I)
 _LEADING_NUMBER_RE = re.compile(r"^(\d+[a-z]?)", re.I)
+_RANGE_RE = re.compile(r"^(\d+)[a-z]?\s*-\s*(\d+)[a-z]?$", re.I)
+
+_MAX_RANGE_SPAN = 100
+"""Ranges wider than this are treated as data errors and not expanded."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,12 +112,23 @@ def normalise_number(value: str) -> str:
 def number_keys(number: str) -> list[str]:
     """Index keys for a house number, covering OSM ranges like ``31-37``.
 
-    Such a record should be findable both as typed in full and by its leading
-    number alone, which is what a volunteer reads off the letterbox.
+    A range record should be findable as typed in full and by any number it
+    covers, which is what a volunteer reads off a letterbox. Ranges step by 2
+    when both ends share parity (the Australian one-side-of-the-street
+    convention), otherwise by 1.
     """
     full = normalise_number(number)
     keys = [full]
-    if match := _LEADING_NUMBER_RE.match(number.strip().lower()):
+    stripped = number.strip().lower()
+    if match := _RANGE_RE.match(stripped):
+        low, high = int(match.group(1)), int(match.group(2))
+        if low < high and high - low <= _MAX_RANGE_SPAN:
+            step = 2 if (high - low) % 2 == 0 else 1
+            keys.extend(
+                key for v in range(low, high + 1, step) if (key := str(v)) not in keys
+            )
+            return keys
+    if match := _LEADING_NUMBER_RE.match(stripped):
         leading = normalise_number(match.group(1))
         if leading != full:
             keys.append(leading)

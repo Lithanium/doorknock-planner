@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.coverage import estimate_effort
+from app.coverage import estimate_effort, stop_groups
 from app.osm.boundary import haversine_m, rings_to_geojson
 from app.services import SnapshotMissingError, SnapshotStore
 from app.walkgraph import WALKING_SPEED_M_PER_MIN
@@ -136,7 +136,7 @@ def hub_preview(
     snapshot = _require_snapshot(request)
     store = _store(request)
     within = [a for a in snapshot.addresses if haversine_m((lat, lon), a.point) <= radius_m]
-    stops = {(a.street, a.number) for a in within}
+    stops = stop_groups(within)
     nearest = store.geocoder.nearest(lat, lon)
 
     walk_m = store.walk_graph.distances_from((lat, lon), store.address_snaps, radius_m)
@@ -153,7 +153,7 @@ def hub_preview(
         "effort": estimate_effort(len(within)),
         "walk": {
             "doors_within": len(walkable),
-            "stops_within": len({(a.street, a.number) for a in walkable}),
+            "stops_within": len(stop_groups(walkable)),
             "streets_within": len({a.street for a in walkable}),
             "minutes_to_farthest": round(max(walk_m.values()) / WALKING_SPEED_M_PER_MIN, 1)
             if walk_m

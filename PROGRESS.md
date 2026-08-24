@@ -17,7 +17,7 @@ is proven to work**.
 | 6 | Volunteer interface | Not started |
 | 7 | Field hardening | Not started |
 
-Current state: **167 backend tests + clean frontend typecheck and build.**
+Current state: **176 backend tests + clean frontend typecheck and build.**
 
 ---
 
@@ -76,9 +76,9 @@ planner makes no external calls at all.
 
 ### Verified
 
-- 140 backend tests pass: `test_geocode` 44, `test_api` 21, `test_fetch` 16,
-  `test_real_snapshot` 16, `test_boundary` 15, `test_coverage` 9,
-  `test_snapshot` 7, `test_offline` 6, `test_overpass` 6.
+- 149 backend tests pass: `test_geocode` 46, `test_api` 21, `test_fetch` 16,
+  `test_real_snapshot` 16, `test_boundary` 15, `test_coverage` 10,
+  `test_snapshot` 7, `test_overpass` 8, `test_offline` 6, `test_services` 4.
 - `test_offline.py` **proves the offline claim** by blocking DNS, TCP connect
   and httpx's network transports while exercising every endpoint. It leaves
   socket creation and the ASGI transport alone, because asyncio needs
@@ -87,7 +87,9 @@ planner makes no external calls at all.
   boundary closes, extent matches ~5.2 x 9.6 km, every address has a street,
   every sampled address round-trips through the geocoder to within 150 m, and
   no candidate merges addresses kilometres apart.
-- Real output confirmed by hand: 28,534 doors / 24,164 stops / 774 streets;
+- Real output confirmed by hand: 28,534 doors / 24,366 stops / 774 streets
+  (stops keyed on street + number + spatial cluster, so the two Mary Streets
+  never merge);
   2,134 doors within 800 m of Kew Junction; the `/api/addresses` payload is
   5.4 MB served in 33 ms.
 
@@ -167,7 +169,7 @@ computed on demand (`single_source_dijkstra_path_length` with a cutoff).
 
 ## Phase 3a — Collapse multi-unit clusters into stops
 
-Turn 28,534 doors into ~24,164 stops, each carrying `door_count` and
+Turn 28,534 doors into ~24,366 stops, each carrying `door_count` and
 `dwell = approach + per_door x N`, flagging 8+ door clusters as probable gated
 complexes. Groundwork exists: `geocode.spatial_clusters` and the coverage
 report already compute this.

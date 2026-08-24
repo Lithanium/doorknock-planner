@@ -12,10 +12,15 @@ help:
 	@echo "make stop            kill servers left running by another terminal"
 	@echo "make test            run backend tests and frontend typecheck"
 
+# A single && chain with cleanup on failure, so a half-installed .venv is
+# never left behind to satisfy this target on the next run.
 $(VENV)/bin/python:
-	python3 -m venv $(VENV)
-	$(PY) -m pip install --quiet --upgrade pip
-	$(PY) -m pip install --quiet -e "backend[dev]"
+	@python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' || \
+		{ echo "error: python3 is $$(python3 --version 2>&1); this project needs Python 3.11+"; exit 1; }
+	python3 -m venv $(VENV) && \
+	$(PY) -m pip install --quiet --upgrade pip && \
+	$(PY) -m pip install --quiet -e "backend[dev]" || \
+	{ rm -rf $(VENV); exit 1; }
 
 frontend/node_modules:
 	npm --prefix frontend install
