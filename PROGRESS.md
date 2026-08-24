@@ -9,7 +9,7 @@ is proven to work**.
 | ----- | ----- | ------ |
 | 0 | Skeleton you can run | **Done** |
 | 1 | Real map data + hub picker, proven trustworthy | **Done** |
-| 2 | Real walking distances | Not started |
+| 2 | Real walking distances | **Done** |
 | 3a | Collapse multi-unit clusters into stops | Not started |
 | 3 | Blockfaces (the "human element", part 1) | Not started |
 | 4 | Territories for N teams | Not started |
@@ -17,7 +17,7 @@ is proven to work**.
 | 6 | Volunteer interface | Not started |
 | 7 | Field hardening | Not started |
 
-Current state: **149 backend tests + clean frontend typecheck and build.**
+Current state: **176 backend tests + clean frontend typecheck and build.**
 
 ---
 
@@ -113,22 +113,57 @@ default or includes them with a manual skip. **Not yet answered.**
 
 ---
 
-## Phase 2 — Real walking distances (Next)
+## Phase 2 — Real walking distances (Done)
 
-Build a `networkx` walking graph from the 6,569 cached ways (include footway,
-residential, path, steps and crossings; exclude `foot=no`, private access).
-Snap each address to its nearest walkable edge with a door-to-footpath offset,
-then compute travel times by multi-source Dijkstra and cache the result.
+Built as planned: a `networkx` walking graph from the 6,569 cached ways,
+addresses snapped to their nearest walkable edge with a door-to-footpath
+offset, travel times by Dijkstra at 80 m/min. No house-to-house matrix — the
+graph and snaps are built lazily once per process and per-hub reachability is
+computed on demand (`single_source_dijkstra_path_length` with a cutoff).
 
-- Dependencies: `networkx==3.6.1` (pure Python, already version-checked).
-- Do **not** attempt a full house-to-house matrix: 28,534² ≈ 792M cells ≈ 3 GB.
-  Compute per-session matrices, and precompute district-wide only at the
-  blockface level (~2-3k units ≈ 36 MB), which Phase 3 makes possible.
+### Built
 
-**Verify:** a debug mode where clicking two houses draws the actual walking
-path with metres and minutes. Two houses either side of the Yarra, a railway
-or Eastern Freeway must route via a real bridge or crossing — this single test
-catches most snapping bugs. Plus unit tests on a hand-built graph.
+| File | Role |
+| ---- | ---- |
+| `backend/app/walkgraph.py` | `WalkGraph`: graph build, spatial grid, edge snapping, `route`, `distances_from` |
+| `backend/app/services.py` | Lazy `walk_graph` / `address_snaps` on the snapshot store |
+| `backend/app/api/routes.py` | `hub/preview` gains a `walk` block; new `GET /api/walk/route` |
+| `frontend/src/App.tsx` | Walking-route check panel, walk stats, in-radius legend |
+| `frontend/src/components/MapView.tsx` | Solid cased district border, route line, in-radius dot colouring |
+
+- Walkability: include the cached highway classes; exclude `foot=no` and
+  `access=private/no` unless `foot=yes/designated/permissive` overrides.
+- Snapping uses a 0.0005° grid over edge segments with an equirectangular
+  point-to-segment projection; snapping all 28,534 addresses takes ~0.8 s
+  (graph build ~0.2 s), so nothing is persisted to disk.
+- Addresses further than 300 m from any walkable way stay unsnapped rather
+  than teleporting; routes and reachability simply exclude them.
+
+### Verified
+
+- 167 backend tests pass (18 new `test_walkgraph` on a hand-built graph where
+  two parallel roads join only via one bridge, 4 new API tests, 4 new
+  real-snapshot tests).
+- The debug mode exists: toggle "Check a walking route", click two houses,
+  and the actual path draws with metres, minutes and a detour factor.
+- The freeway test passes against the real extract: 15 Aquila Street to
+  49 Riverside Avenue (opposite sides of the Eastern Freeway, 272 m apart)
+  routes 702 m (×2.58) via the Bulleen Road crossing, not straight across.
+  Neighbouring houses on one street route near-directly.
+- The real network is 96.9% one connected component; 99.9% of doors snap,
+  median door-to-footpath offset ~10 m.
+- `hub/preview` now reports crow-flies **and** walking reachability: 800 m
+  around Kew Junction holds 2,134 doors by circle but only 1,277 within an
+  800 m real walk (10 min to the farthest) — exactly the gap Phase 2 exists
+  to expose.
+
+### UI feedback folded in
+
+- The Kew boundary is now a solid blue line over a white casing (was a thin
+  dashed line that vanished into the basemap).
+- Selecting a hub draws the radius circle and recolours the address dots:
+  green inside the circle (pamphlets still needed), red outside, with a
+  sidebar legend giving the in-circle door count.
 
 ---
 

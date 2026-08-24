@@ -1,4 +1,4 @@
-import type { Feature, MultiPolygon, Point } from "geojson";
+import type { Feature, LineString, MultiPolygon, Point } from "geojson";
 
 export interface Health {
   status: string;
@@ -76,6 +76,22 @@ export interface HubPreview {
   streets_within: number;
   nearest_address: string | null;
   effort: Effort;
+  walk: WalkReach;
+}
+
+export interface WalkReach {
+  doors_within: number;
+  stops_within: number;
+  streets_within: number;
+  minutes_to_farthest: number;
+}
+
+export interface WalkRoute {
+  distance_m: number;
+  minutes: number;
+  crow_flies_m: number;
+  detour_ratio: number;
+  geometry: LineString;
 }
 
 export interface ReverseResult {
@@ -108,4 +124,6 @@ export const api = {
   reverse: (lat: number, lon: number) => get<ReverseResult>("/api/reverse", { lat, lon }),
   hubPreview: (lat: number, lon: number, radius_m: number) =>
     get<HubPreview>("/api/hub/preview", { lat, lon, radius_m }),
+  walkRoute: (from_lat: number, from_lon: number, to_lat: number, to_lon: number) =>
+    get<WalkRoute>("/api/walk/route", { from_lat, from_lon, to_lat, to_lon }),
 };

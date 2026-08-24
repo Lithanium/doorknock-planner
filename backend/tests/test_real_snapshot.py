@@ -127,3 +127,45 @@ def test_geocoder_indexes_every_distinct_street(real_snapshot):
     geocoder = LocalGeocoder(real_snapshot.addresses)
     distinct = {normalise_street(a.street) for a in real_snapshot.addresses}
     assert geocoder.street_count == len(distinct)
+
+
+@pytest.fixture
+def real_walk_graph(real_snapshot):
+    from app.walkgraph import WalkGraph
+
+    return WalkGraph(real_snapshot.ways)
+
+
+def test_walking_graph_is_one_connected_footpath_network(real_walk_graph):
+    import networkx as nx
+
+    largest = max(nx.connected_components(real_walk_graph.graph), key=len)
+    assert len(largest) / real_walk_graph.node_count > 0.95
+
+
+def test_nearly_every_door_snaps_to_a_nearby_footpath(real_snapshot, real_walk_graph):
+    snaps = real_walk_graph.snap_addresses(real_snapshot.addresses)
+    assert len(snaps) / len(real_snapshot.addresses) > 0.99
+    offsets = sorted(s.offset_m for s in snaps.values())
+    assert offsets[len(offsets) // 2] < 25
+
+
+def test_route_across_the_eastern_freeway_uses_a_real_crossing(real_walk_graph):
+    """15 Aquila Street and 49 Riverside Avenue face each other across the
+    Eastern Freeway, 272 m apart as the crow flies. The walking route must
+    detour to a real crossing rather than cutting straight over the freeway."""
+    aquila = (-37.7868078, 145.0721409)
+    riverside = (-37.789239, 145.0717829)
+    route = real_walk_graph.route(aquila, riverside)
+    assert route is not None
+    crow_flies = haversine_m(aquila, riverside)
+    assert route.distance_m > 2 * crow_flies
+    assert route.distance_m < 6 * crow_flies
+
+
+def test_neighbouring_doors_on_one_street_route_almost_directly(real_walk_graph):
+    a = (-37.7892515, 145.0714063)  # 45 Riverside Avenue
+    b = (-37.789239, 145.0717829)  # 49 Riverside Avenue
+    route = real_walk_graph.route(a, b)
+    assert route is not None
+    assert route.distance_m < 3 * haversine_m(a, b) + 50

@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from app.coverage import estimate_effort, stop_groups
 from app.osm.boundary import haversine_m, rings_to_geojson
 from app.services import SnapshotMissingError, SnapshotStore
+from app.walkgraph import WALKING_SPEED_M_PER_MIN
 
 router = APIRouter(prefix="/api")
 
@@ -133,9 +134,13 @@ def hub_preview(
 ) -> dict:
     """Summarises the workload reachable from a candidate pamphlet hub."""
     snapshot = _require_snapshot(request)
+    store = _store(request)
     within = [a for a in snapshot.addresses if haversine_m((lat, lon), a.point) <= radius_m]
     stops = stop_groups(within)
-    nearest = _store(request).geocoder.nearest(lat, lon)
+    nearest = store.geocoder.nearest(lat, lon)
+
+    walk_m = store.walk_graph.distances_from((lat, lon), store.address_snaps, radius_m)
+    walkable = [a for a in snapshot.addresses if a.osm_id in walk_m]
     return {
         "lat": lat,
         "lon": lon,
@@ -146,4 +151,42 @@ def hub_preview(
         "streets_within": len({a.street for a in within}),
         "nearest_address": nearest.label if nearest else None,
         "effort": estimate_effort(len(within)),
+        "walk": {
+            "doors_within": len(walkable),
+            "stops_within": len(stop_groups(walkable)),
+            "streets_within": len({a.street for a in walkable}),
+            "minutes_to_farthest": round(max(walk_m.values()) / WALKING_SPEED_M_PER_MIN, 1)
+            if walk_m
+            else 0.0,
+        },
+    }
+
+
+@router.get("/walk/route")
+def walk_route(
+    request: Request,
+    from_lat: float,
+    from_lon: float,
+    to_lat: float,
+    to_lon: float,
+) -> dict:
+    """Shortest walking path between two points, door to door."""
+    store = _store(request)
+    _require_snapshot(request)
+    route = store.walk_graph.route((from_lat, from_lon), (to_lat, to_lon))
+    if route is None:
+        raise HTTPException(
+            status_code=404,
+            detail="no walking route found; both points must be near a walkable way",
+        )
+    crow_flies = haversine_m((from_lat, from_lon), (to_lat, to_lon))
+    return {
+        "distance_m": round(route.distance_m, 1),
+        "minutes": round(route.minutes, 1),
+        "crow_flies_m": round(crow_flies, 1),
+        "detour_ratio": round(route.distance_m / crow_flies, 2) if crow_flies > 1 else 1.0,
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [[lon, lat] for lat, lon in route.points],
+        },
     }

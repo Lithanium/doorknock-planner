@@ -7,6 +7,7 @@ dependencies = [
     "fastapi==0.141.1",
     "uvicorn[standard]==0.52.3",
     "httpx==0.28.1",
+    "networkx==3.6.1",
 ]
 
 [project.optional-dependencies]

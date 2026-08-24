@@ -6,6 +6,7 @@ from pathlib import Path
 from app.coverage import CoverageReport, build_coverage_report
 from app.geocode import LocalGeocoder
 from app.osm.snapshot import DistrictSnapshot
+from app.walkgraph import EdgeSnap, WalkGraph
 
 
 class SnapshotMissingError(RuntimeError):
@@ -31,6 +32,8 @@ class SnapshotStore:
         self._snapshot: DistrictSnapshot | None = None
         self._geocoder: LocalGeocoder | None = None
         self._coverage: CoverageReport | None = None
+        self._walk_graph: WalkGraph | None = None
+        self._address_snaps: dict[str, EdgeSnap] | None = None
         self._loaded_mtime: float | None = None
 
     @property
@@ -58,6 +61,24 @@ class SnapshotStore:
                 self._coverage = build_coverage_report(snapshot)
             return self._coverage
 
+    @property
+    def walk_graph(self) -> WalkGraph:
+        with self._lock:
+            snapshot = self._snapshot_locked()
+            if self._walk_graph is None:
+                self._walk_graph = WalkGraph(snapshot.ways)
+            return self._walk_graph
+
+    @property
+    def address_snaps(self) -> dict[str, EdgeSnap]:
+        with self._lock:
+            snapshot = self._snapshot_locked()
+            if self._walk_graph is None:
+                self._walk_graph = WalkGraph(snapshot.ways)
+            if self._address_snaps is None:
+                self._address_snaps = self._walk_graph.snap_addresses(snapshot.addresses)
+            return self._address_snaps
+
     def reload(self) -> None:
         with self._lock:
             self._clear_locked()
@@ -77,4 +98,6 @@ class SnapshotStore:
         self._snapshot = None
         self._geocoder = None
         self._coverage = None
+        self._walk_graph = None
+        self._address_snaps = None
         self._loaded_mtime = None
