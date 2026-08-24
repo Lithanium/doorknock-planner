@@ -123,3 +123,54 @@ def test_hub_preview_rejects_an_absurd_radius(client):
     assert client.get(
         "/api/hub/preview", params={"lat": -37.8, "lon": 145.05, "radius_m": 99_999}
     ).status_code == 422
+
+
+def test_hub_preview_reports_walking_reachability(client):
+    body = client.get(
+        "/api/hub/preview", params={"lat": -37.800, "lon": 145.050, "radius_m": 800}
+    ).json()
+    walk = body["walk"]
+    # Only the Yerrin Street doors sit on the connected fixture way; the
+    # others are near disconnected or absent ways, so crow-flies overcounts.
+    assert 0 < walk["doors_within"] <= body["doors_within"]
+    assert walk["stops_within"] <= body["stops_within"]
+    assert walk["minutes_to_farthest"] >= 0
+
+
+def test_walk_route_returns_geometry_and_minutes(client):
+    body = client.get(
+        "/api/walk/route",
+        params={"from_lat": -37.800, "from_lon": 145.050, "to_lat": -37.801, "to_lon": 145.0505},
+    ).json()
+    assert body["geometry"]["type"] == "LineString"
+    assert body["geometry"]["coordinates"][0] == [145.050, -37.800]
+    assert body["distance_m"] > 0
+    assert body["minutes"] == pytest.approx(body["distance_m"] / 80, abs=0.1)
+    assert body["detour_ratio"] >= 1.0
+
+
+def test_walk_route_404s_when_no_path_exists(client):
+    # Way 1 (Yerrin Street) and way 3 (the footway) are disconnected in the
+    # fixture, so a route between them must fail loudly, not guess.
+    response = client.get(
+        "/api/walk/route",
+        params={"from_lat": -37.800, "from_lon": 145.050, "to_lat": -37.8022, "to_lon": 145.0512},
+    )
+    assert response.status_code == 404
+
+
+def test_walk_route_404s_far_from_the_network(client):
+    response = client.get(
+        "/api/walk/route",
+        params={"from_lat": -37.700, "from_lon": 145.200, "to_lat": -37.800, "to_lon": 145.050},
+    )
+    assert response.status_code == 404
+
+
+def test_walk_route_without_a_snapshot_explains_the_fix(empty_client):
+    response = empty_client.get(
+        "/api/walk/route",
+        params={"from_lat": -37.8, "from_lon": 145.05, "to_lat": -37.801, "to_lon": 145.051},
+    )
+    assert response.status_code == 503
+    assert "fetch-district" in response.json()["detail"]

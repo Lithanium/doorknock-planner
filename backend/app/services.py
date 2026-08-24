@@ -6,6 +6,7 @@ from pathlib import Path
 from app.coverage import CoverageReport, build_coverage_report
 from app.geocode import LocalGeocoder
 from app.osm.snapshot import DistrictSnapshot
+from app.walkgraph import EdgeSnap, WalkGraph
 
 
 class SnapshotMissingError(RuntimeError):
@@ -41,6 +42,14 @@ class SnapshotStore:
     def coverage(self) -> CoverageReport:
         return build_coverage_report(self.snapshot)
 
+    @cached_property
+    def walk_graph(self) -> WalkGraph:
+        return WalkGraph(self.snapshot.ways)
+
+    @cached_property
+    def address_snaps(self) -> dict[str, EdgeSnap]:
+        return self.walk_graph.snap_addresses(self.snapshot.addresses)
+
     def reload(self) -> None:
-        for attr in ("snapshot", "geocoder", "coverage"):
+        for attr in ("snapshot", "geocoder", "coverage", "walk_graph", "address_snaps"):
             self.__dict__.pop(attr, None)

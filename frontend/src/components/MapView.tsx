@@ -13,7 +13,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
-import type { AddressFeatureCollection, District } from "../api";
+import type { AddressFeatureCollection, District, WalkRoute } from "../api";
 import { circlePolygon } from "../geo";
 
 const EMPTY: FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -36,10 +36,12 @@ interface Props {
   addresses: AddressFeatureCollection | null;
   hub: { lat: number; lon: number } | null;
   radiusM: number;
+  route: WalkRoute | null;
+  routePoints: { lat: number; lon: number }[];
   onPick: (lat: number, lon: number) => void;
 }
 
-export function MapView({ district, addresses, hub, radiusM, onPick }: Props) {
+export function MapView({ district, addresses, hub, radiusM, route, routePoints, onPick }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
@@ -68,10 +70,16 @@ export function MapView({ district, addresses, hub, radiusM, onPick }: Props) {
         paint: { "fill-color": "#2563eb", "fill-opacity": 0.06 },
       });
       map.addLayer({
+        id: "district-casing",
+        type: "line",
+        source: "district",
+        paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.85 },
+      });
+      map.addLayer({
         id: "district-line",
         type: "line",
         source: "district",
-        paint: { "line-color": "#1d4ed8", "line-width": 2.5, "line-dasharray": [3, 2] },
+        paint: { "line-color": "#1d4ed8", "line-width": 3 },
       });
 
       map.addSource("radius", { type: "geojson", data: EMPTY });
@@ -102,6 +110,35 @@ export function MapView({ district, addresses, hub, radiusM, onPick }: Props) {
         },
       });
 
+      map.addSource("walk-route", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "walk-route-casing",
+        type: "line",
+        source: "walk-route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 7, "line-opacity": 0.9 },
+      });
+      map.addLayer({
+        id: "walk-route-line",
+        type: "line",
+        source: "walk-route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#7c3aed", "line-width": 3.5 },
+      });
+
+      map.addSource("route-points", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "route-points-dots",
+        type: "circle",
+        source: "route-points",
+        paint: {
+          "circle-radius": 6,
+          "circle-color": "#7c3aed",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
       const popup = new Popup({ closeButton: false, closeOnClick: false });
       map.on("mouseenter", "addresses-dots", (event: MapLayerMouseEvent) => {
         const feature = event.features?.[0];
@@ -118,6 +155,12 @@ export function MapView({ district, addresses, hub, radiusM, onPick }: Props) {
     });
 
     map.on("click", (event: MapMouseEvent) => {
+      const dots = map.queryRenderedFeatures(event.point, { layers: ["addresses-dots"] });
+      const door = dots[0]?.geometry;
+      if (door?.type === "Point") {
+        onPickRef.current(door.coordinates[1], door.coordinates[0]);
+        return;
+      }
       onPickRef.current(event.lngLat.lat, event.lngLat.lng);
     });
 
@@ -159,11 +202,19 @@ export function MapView({ district, addresses, hub, radiusM, onPick }: Props) {
     if (!source) return;
     if (!hub) {
       source.setData(EMPTY);
+      map.setPaintProperty("addresses-dots", "circle-color", "#dc2626");
       markerRef.current?.remove();
       markerRef.current = null;
       return;
     }
-    source.setData(circlePolygon(hub.lat, hub.lon, radiusM));
+    const circle = circlePolygon(hub.lat, hub.lon, radiusM);
+    source.setData(circle);
+    map.setPaintProperty("addresses-dots", "circle-color", [
+      "case",
+      ["within", circle],
+      "#16a34a",
+      "#dc2626",
+    ]);
     if (markerRef.current) {
       markerRef.current.setLngLat([hub.lon, hub.lat]);
       return;
@@ -177,6 +228,24 @@ export function MapView({ district, addresses, hub, radiusM, onPick }: Props) {
     });
     markerRef.current = marker;
   }, [ready, hub, radiusM]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const routeSource = map.getSource("walk-route") as GeoJSONSource | undefined;
+    routeSource?.setData(
+      route ? { type: "Feature", properties: {}, geometry: route.geometry } : EMPTY,
+    );
+    const pointsSource = map.getSource("route-points") as GeoJSONSource | undefined;
+    pointsSource?.setData({
+      type: "FeatureCollection",
+      features: routePoints.map((p) => ({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+      })),
+    });
+  }, [ready, route, routePoints]);
 
   return <div ref={containerRef} className="map" />;
 }
