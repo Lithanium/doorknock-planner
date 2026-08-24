@@ -1,0 +1,20 @@
+[project]
+name = "doorknock-planner-backend"
+version = "0.1.0"
+description = "Doorknocking route planner for the Victorian Electoral District of Kew"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.3",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "snapshot: requires the cached district snapshot (run `make fetch-district` first)",
+]

@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+node_modules/
+frontend/dist/
+
+# Derived indexes are rebuilt from the district snapshot.
+data/derived/
+
+# data/district/*.json.gz is intentionally NOT ignored: it is small (~0.9 MB)
+# and committing it means volunteers never need to call Overpass at all.
+
+.DS_Store

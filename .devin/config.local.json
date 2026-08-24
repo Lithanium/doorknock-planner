@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Exec(ls)",
+      "Exec(mkdir)",
+      "Exec(../.venv/bin/python)",
+      "Exec(.venv/bin/python)",
+      "Exec(grep)"
+    ]
+  }
+}
