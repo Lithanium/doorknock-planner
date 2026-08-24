@@ -108,6 +108,20 @@ test` works on a fresh clone.
   has to guess. The split is near-even: 14,203 even, 14,331 odd.
 - 1,227 ways tag `maxspeed` (683 are 50, 433 are 60) and 772 tag `lanes`,
   which is enough to classify arterials without guessing from road class alone.
+- **Greedy region-growing balances badly on its own; pure variance-descent
+  rebalancing stalls on equal-weight units.** Growing from hub-spread seeds can
+  leave a 50% workload spread. Boundary trades fix it, but when a heavy and a
+  light territory never touch, work has to cascade through a middle team, and
+  that intermediate move is variance-*neutral* (near-equal unit weights), so a
+  strict-improvement rule never takes it. `territory.py` accepts plateau moves
+  (within `_PLATEAU_EPS` minutes of even, heavier -> lighter only, with a
+  don't-move-straight-back rule) and keeps the best layout seen. Real-district
+  spread at 800 m / 50 Cotham Road: <= 6% for 2-6 teams, 11.6% at 8, where
+  whole-street units get chunky relative to a team's share.
+- **A street is a unit, not a blockface, when carving territories.** "No street
+  split between teams" means grouping each street's touching blockfaces first;
+  only a street bigger than 1.2x a team's whole share is cut (in house-number
+  order), and it is reported in `split_streets`, never silently.
 
 ## Throughput reality
 

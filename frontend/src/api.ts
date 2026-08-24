@@ -1,4 +1,11 @@
-import type { Feature, LineString, MultiPolygon, Point } from "geojson";
+import type {
+  Feature,
+  LineString,
+  MultiLineString,
+  MultiPoint,
+  MultiPolygon,
+  Point,
+} from "geojson";
 
 export interface Health {
   status: string;
@@ -94,6 +101,44 @@ export interface WalkRoute {
   geometry: LineString;
 }
 
+export interface TerritoryTeam {
+  team: number;
+  minutes: number;
+  doors: number;
+  stops: number;
+  blockfaces: number;
+  streets: string[];
+  contiguous: boolean;
+}
+
+export interface TerritoryFeature {
+  type: "Feature";
+  id: string;
+  geometry: MultiLineString | MultiPoint;
+  properties: {
+    team: number;
+    label: string;
+    street: string;
+    minutes: number;
+    doors: number;
+  };
+}
+
+export interface Territories {
+  type: "FeatureCollection";
+  lat: number;
+  lon: number;
+  radius_m: number;
+  team_count: number;
+  blockface_count: number;
+  total_minutes: number;
+  target_minutes: number;
+  spread_pct: number;
+  split_streets: string[];
+  teams: TerritoryTeam[];
+  features: TerritoryFeature[];
+}
+
 export interface ReverseResult {
   label: string;
   lat: number;
@@ -126,4 +171,6 @@ export const api = {
     get<HubPreview>("/api/hub/preview", { lat, lon, radius_m }),
   walkRoute: (from_lat: number, from_lon: number, to_lat: number, to_lon: number) =>
     get<WalkRoute>("/api/walk/route", { from_lat, from_lon, to_lat, to_lon }),
+  territories: (lat: number, lon: number, teams: number, radius_m: number) =>
+    get<Territories>("/api/territories", { lat, lon, teams, radius_m }),
 };

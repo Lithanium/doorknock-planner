@@ -8,9 +8,10 @@ import {
   type GeocodeCandidate,
   type Health,
   type HubPreview,
+  type Territories,
   type WalkRoute,
 } from "./api";
-import { MapView } from "./components/MapView";
+import { MapView, TEAM_COLORS } from "./components/MapView";
 import { formatNumber } from "./geo";
 
 interface Hub {
@@ -20,6 +21,7 @@ interface Hub {
 }
 
 const RADIUS_OPTIONS = [400, 600, 800, 1000, 1500];
+const TEAM_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -38,7 +40,11 @@ export function App() {
   const [routePoints, setRoutePoints] = useState<{ lat: number; lon: number }[]>([]);
   const [route, setRoute] = useState<WalkRoute | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const [teams, setTeams] = useState(0);
+  const [territories, setTerritories] = useState<Territories | null>(null);
+  const [territoriesLoading, setTerritoriesLoading] = useState(false);
   const searchToken = useRef(0);
+  const territoryToken = useRef(0);
 
   useEffect(() => {
     api
@@ -138,6 +144,31 @@ export function App() {
       })
       .catch((e: Error) => setError(e.message));
   }, [radiusM, hub]);
+
+  useEffect(() => {
+    const token = ++territoryToken.current;
+    if (!hub || teams === 0) {
+      setTerritories(null);
+      setTerritoriesLoading(false);
+      return;
+    }
+    setTerritoriesLoading(true);
+    api
+      .territories(hub.lat, hub.lon, teams, radiusM)
+      .then((t) => {
+        if (token !== territoryToken.current) return;
+        setTerritories(t);
+        setError(null);
+      })
+      .catch((e: Error) => {
+        if (token !== territoryToken.current) return;
+        setTerritories(null);
+        setError(e.message);
+      })
+      .finally(() => {
+        if (token === territoryToken.current) setTerritoriesLoading(false);
+      });
+  }, [teams, radiusM, hub]);
 
   if (health && !health.snapshot_available) {
     return (
@@ -259,6 +290,59 @@ export function App() {
           </section>
         )}
 
+        {hub && (
+          <section>
+            <h2>3. Team territories</h2>
+            <div className="radios">
+              {TEAM_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  className={option === teams ? "chip chip-on" : "chip"}
+                  onClick={() => setTeams(option)}
+                >
+                  {option === 0 ? "off" : option}
+                </button>
+              ))}
+            </div>
+            {territoriesLoading && <p className="muted">carving territories…</p>}
+            {territories && !territoriesLoading && (
+              <>
+                <p className="muted">
+                  {territories.blockface_count} blockfaces ·{" "}
+                  {formatNumber(Math.round(territories.total_minutes))} min total · target{" "}
+                  {formatNumber(Math.round(territories.target_minutes))} min/team · spread{" "}
+                  {territories.spread_pct}%
+                </p>
+                <table className="stats">
+                  <tbody>
+                    {territories.teams.map((team) => (
+                      <tr key={team.team}>
+                        <th>
+                          <span
+                            className="dot"
+                            style={{ background: TEAM_COLORS[team.team - 1] }}
+                          />{" "}
+                          Team {team.team}
+                        </th>
+                        <td>
+                          {formatNumber(Math.round(team.minutes))} min · {formatNumber(team.doors)}{" "}
+                          doors · {team.streets.length} streets
+                          {!team.contiguous && " · split area"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {territories.split_streets.length > 0 && (
+                  <p className="hint">
+                    Split between teams: {territories.split_streets.join(", ")}
+                  </p>
+                )}
+              </>
+            )}
+          </section>
+        )}
+
         <section>
           <h2>Walking route check</h2>
           <button className={routeMode ? "chip chip-on" : "chip"} onClick={toggleRouteMode}>
@@ -357,6 +441,7 @@ export function App() {
         radiusM={radiusM}
         route={route}
         routePoints={routePoints}
+        territories={territories}
         onPick={pickFromMap}
       />
     </div>

@@ -4,6 +4,7 @@ import {
   NavigationControl,
   Popup,
   ScaleControl,
+  type ExpressionSpecification,
   type GeoJSONSource,
   type MapLayerMouseEvent,
   type MapMouseEvent,
@@ -13,10 +14,35 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
-import type { AddressFeatureCollection, District, WalkRoute } from "../api";
+import type { AddressFeatureCollection, District, Territories, WalkRoute } from "../api";
 import { circlePolygon } from "../geo";
 
 const EMPTY: FeatureCollection = { type: "FeatureCollection", features: [] };
+
+export const TEAM_COLORS = [
+  "#e6194b",
+  "#3cb44b",
+  "#4363d8",
+  "#f58231",
+  "#911eb4",
+  "#46f0f0",
+  "#f032e6",
+  "#9a6324",
+];
+
+const TEAM_COLOR_EXPRESSION: ExpressionSpecification = [
+  "match",
+  ["get", "team"],
+  1, TEAM_COLORS[0],
+  2, TEAM_COLORS[1],
+  3, TEAM_COLORS[2],
+  4, TEAM_COLORS[3],
+  5, TEAM_COLORS[4],
+  6, TEAM_COLORS[5],
+  7, TEAM_COLORS[6],
+  8, TEAM_COLORS[7],
+  "#64748b",
+];
 
 const BASEMAP_STYLE: StyleSpecification = {
   version: 8,
@@ -38,10 +64,20 @@ interface Props {
   radiusM: number;
   route: WalkRoute | null;
   routePoints: { lat: number; lon: number }[];
+  territories: Territories | null;
   onPick: (lat: number, lon: number) => void;
 }
 
-export function MapView({ district, addresses, hub, radiusM, route, routePoints, onPick }: Props) {
+export function MapView({
+  district,
+  addresses,
+  hub,
+  radiusM,
+  route,
+  routePoints,
+  territories,
+  onPick,
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
@@ -110,6 +146,37 @@ export function MapView({ district, addresses, hub, radiusM, route, routePoints,
         },
       });
 
+      map.addSource("territories", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "territories-casing",
+        type: "line",
+        source: "territories",
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 9, "line-opacity": 0.7 },
+      });
+      map.addLayer({
+        id: "territories-lines",
+        type: "line",
+        source: "territories",
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": TEAM_COLOR_EXPRESSION, "line-width": 5, "line-opacity": 0.85 },
+      });
+      map.addLayer({
+        id: "territories-points",
+        type: "circle",
+        source: "territories",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": 5,
+          "circle-color": TEAM_COLOR_EXPRESSION,
+          "circle-opacity": 0.85,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
       map.addSource("walk-route", { type: "geojson", data: EMPTY });
       map.addLayer({
         id: "walk-route-casing",
@@ -140,6 +207,20 @@ export function MapView({ district, addresses, hub, radiusM, route, routePoints,
       });
 
       const popup = new Popup({ closeButton: false, closeOnClick: false });
+      map.on("mouseenter", "territories-lines", (event: MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        map.getCanvas().style.cursor = "pointer";
+        const props = feature.properties ?? {};
+        popup
+          .setLngLat(event.lngLat)
+          .setText(`Team ${props.team}: ${props.label} (${props.minutes} min, ${props.doors} doors)`)
+          .addTo(map);
+      });
+      map.on("mouseleave", "territories-lines", () => {
+        map.getCanvas().style.cursor = "";
+        popup.remove();
+      });
       map.on("mouseenter", "addresses-dots", (event: MapLayerMouseEvent) => {
         const feature = event.features?.[0];
         if (!feature) return;
@@ -228,6 +309,17 @@ export function MapView({ district, addresses, hub, radiusM, route, routePoints,
     });
     markerRef.current = marker;
   }, [ready, hub, radiusM]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const source = map.getSource("territories") as GeoJSONSource | undefined;
+    source?.setData(
+      territories
+        ? { type: "FeatureCollection", features: territories.features as never[] }
+        : EMPTY,
+    );
+  }, [ready, territories]);
 
   useEffect(() => {
     const map = mapRef.current;

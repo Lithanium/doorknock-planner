@@ -267,3 +267,63 @@ def test_walk_route_without_a_snapshot_explains_the_fix(empty_client):
     )
     assert response.status_code == 503
     assert "fetch-district" in response.json()["detail"]
+
+
+def test_territories_split_the_walkable_blockfaces_between_teams(client):
+    body = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 2, "radius_m": 800},
+    ).json()
+    assert body["type"] == "FeatureCollection"
+    assert body["team_count"] == 2
+    assert body["blockface_count"] == len(body["features"]) > 0
+    assert {t["team"] for t in body["teams"]} == {1, 2}
+    assert body["target_minutes"] == pytest.approx(body["total_minutes"] / 2, abs=0.1)
+
+
+def test_territories_assign_every_blockface_to_exactly_one_team(client):
+    body = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 3, "radius_m": 800},
+    ).json()
+    ids = [f["id"] for f in body["features"]]
+    assert len(ids) == len(set(ids))
+    assert all(1 <= f["properties"]["team"] <= 3 for f in body["features"])
+
+
+def test_territories_features_carry_workload_properties(client):
+    body = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 1, "radius_m": 800},
+    ).json()
+    for feature in body["features"]:
+        props = feature["properties"]
+        assert props["street"]
+        assert props["minutes"] > 0
+        assert props["doors"] > 0
+        assert feature["geometry"]["type"] in ("MultiLineString", "MultiPoint")
+
+
+def test_territories_reject_more_than_the_supported_team_count(client):
+    response = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 9, "radius_m": 800},
+    )
+    assert response.status_code == 422
+
+
+def test_territories_reject_zero_teams(client):
+    response = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 0, "radius_m": 800},
+    )
+    assert response.status_code == 422
+
+
+def test_territories_without_a_snapshot_explain_the_fix(empty_client):
+    response = empty_client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 2},
+    )
+    assert response.status_code == 503
+    assert "fetch-district" in response.json()["detail"]
