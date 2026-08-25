@@ -93,3 +93,12 @@ def test_hub_preview_works_offline(offline_client):
     ).json()
     assert body["doors_within"] > 0
     assert body["nearest_address"]
+
+
+def test_territories_work_offline(offline_client):
+    body = offline_client.get(
+        "/api/territories",
+        params={"lat": -37.8060, "lon": 145.0300, "teams": 2, "radius_m": 800},
+    ).json()
+    assert body["features"]
+    assert {t["team"] for t in body["teams"]} == {1, 2}

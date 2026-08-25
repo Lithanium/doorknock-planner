@@ -7,6 +7,7 @@ from app.geocode import normalise_street
 from app.osm.boundary import haversine_m, rings_to_geojson
 from app.services import SnapshotMissingError, SnapshotStore
 from app.stops import build_stops
+from app.territory import MAX_TEAMS, build_territories
 from app.walkgraph import WALKING_SPEED_M_PER_MIN
 
 router = APIRouter(prefix="/api")
@@ -257,6 +258,73 @@ def hub_preview(
             if walk_m
             else 0.0,
         },
+    }
+
+
+@router.get("/territories")
+def territories(
+    request: Request,
+    lat: float,
+    lon: float,
+    teams: int = Query(ge=1, le=MAX_TEAMS),
+    radius_m: float = Query(default=800, ge=50, le=3000),
+) -> dict:
+    """Splits the hub's walkable blockfaces into balanced team territories."""
+    _require_snapshot(request)
+    store = _store(request)
+    walk_m = store.walk_graph.distances_from((lat, lon), store.address_snaps, radius_m)
+    reachable_ids = {
+        s.stop_id for s in store.stops if any(d.osm_id in walk_m for d in s.doors)
+    }
+    faces = [
+        b for b in store.blockfaces if any(s.stop_id in reachable_ids for s in b.stops)
+    ]
+    plan = build_territories(faces, (lat, lon), teams)
+    total_minutes = sum(t.minutes for t in plan.territories)
+    features = []
+    for territory in plan.territories:
+        for b in territory.blockfaces:
+            if b.path:
+                geometry: dict = {
+                    "type": "MultiLineString",
+                    "coordinates": [
+                        [[pt_lon, pt_lat] for pt_lat, pt_lon in chain] for chain in b.path
+                    ],
+                }
+            else:
+                # Off-network fallbacks have no carriageway geometry, so they
+                # draw as their stop points instead of vanishing.
+                geometry = {
+                    "type": "MultiPoint",
+                    "coordinates": [[s.lon, s.lat] for s in b.stops],
+                }
+            features.append(
+                {
+                    "type": "Feature",
+                    "id": b.blockface_id,
+                    "geometry": geometry,
+                    "properties": {
+                        "team": territory.team,
+                        "label": b.label,
+                        "street": b.street,
+                        "minutes": round(b.minutes, 1),
+                        "doors": b.door_count,
+                    },
+                }
+            )
+    return {
+        "type": "FeatureCollection",
+        "lat": lat,
+        "lon": lon,
+        "radius_m": radius_m,
+        "team_count": teams,
+        "blockface_count": len(faces),
+        "total_minutes": round(total_minutes, 1),
+        "target_minutes": round(total_minutes / teams, 1),
+        "spread_pct": round(plan.spread_pct * 100, 1),
+        "split_streets": plan.split_streets,
+        "teams": [t.to_dict() for t in plan.territories],
+        "features": features,
     }
 
 

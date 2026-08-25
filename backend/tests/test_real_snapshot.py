@@ -314,3 +314,74 @@ def test_neighbouring_doors_on_one_street_route_almost_directly(real_walk_graph)
     route = real_walk_graph.route(a, b)
     assert route is not None
     assert route.distance_m < 3 * haversine_m(a, b) + 50
+
+
+TERRITORY_HUB = (-37.8071644, 145.0320872)  # 50 Cotham Road, near Kew Junction
+
+
+@pytest.fixture(scope="module")
+def hub_faces(real_snapshot, real_blockfaces):
+    from app.walkgraph import WalkGraph
+
+    graph = WalkGraph(real_snapshot.ways)
+    snaps = graph.snap_addresses(real_snapshot.addresses)
+    walk_m = graph.distances_from(TERRITORY_HUB, snaps, 800)
+    reachable = {
+        s.stop_id
+        for b in real_blockfaces
+        for s in b.stops
+        if any(d.osm_id in walk_m for d in s.doors)
+    }
+    return [b for b in real_blockfaces if any(s.stop_id in reachable for s in b.stops)]
+
+
+class TestRealTerritories:
+    """Phase 4 against the real district: an 800 m hub near Kew Junction."""
+
+    def test_the_hub_reaches_a_meaningful_slice_of_the_district(self, hub_faces):
+        assert 100 < len(hub_faces) < 400
+
+    def test_every_team_count_assigns_each_blockface_exactly_once(self, hub_faces):
+        from app.territory import build_territories
+
+        all_ids = sorted(b.blockface_id for b in hub_faces)
+        for teams in range(1, 9):
+            plan = build_territories(hub_faces, TERRITORY_HUB, teams)
+            assigned = sorted(
+                b.blockface_id for t in plan.territories for b in t.blockfaces
+            )
+            assert assigned == all_ids
+
+    def test_teams_come_out_practically_balanced(self, hub_faces):
+        from app.territory import build_territories
+
+        for teams in range(2, 9):
+            plan = build_territories(hub_faces, TERRITORY_HUB, teams)
+            assert plan.spread_pct <= 0.15, (
+                f"{teams} teams spread {plan.spread_pct:.0%}: "
+                f"{[round(t.minutes) for t in plan.territories]}"
+            )
+
+    def test_every_territory_is_contiguous(self, hub_faces):
+        from app.territory import build_territories
+
+        for teams in range(1, 9):
+            plan = build_territories(hub_faces, TERRITORY_HUB, teams)
+            assert all(t.contiguous for t in plan.territories), (
+                f"{teams} teams: {[t.contiguous for t in plan.territories]}"
+            )
+
+    def test_no_street_needs_splitting_at_this_radius(self, hub_faces):
+        from app.territory import build_territories
+
+        plan = build_territories(hub_faces, TERRITORY_HUB, 8)
+        assert plan.split_streets == []
+
+    def test_partitioning_is_deterministic(self, hub_faces):
+        from app.territory import build_territories
+
+        first = build_territories(hub_faces, TERRITORY_HUB, 4)
+        second = build_territories(hub_faces, TERRITORY_HUB, 4)
+        assert [
+            [b.blockface_id for b in t.blockfaces] for t in first.territories
+        ] == [[b.blockface_id for b in t.blockfaces] for t in second.territories]

@@ -12,13 +12,15 @@ is proven to work**.
 | 2 | Real walking distances | **Done** |
 | 3a | Collapse multi-unit clusters into stops | **Done** |
 | 3 | Blockfaces (the "human element", part 1) | **Backend done**, UI pending |
-| 4 | Territories for N teams | Not started |
+| 4 | Territories for N teams | **Done** |
 | 5 | Routing with pamphlet capacity and priority | Not started |
 | 6 | Volunteer interface | Not started |
 | 7 | Field hardening | Not started |
 
-Current state: **294 backend tests + clean frontend typecheck.** Phase 3 has no
-map UI yet: `/api/blockfaces` serves drawable geometry, but nothing renders it.
+Current state: **318 backend tests + clean frontend typecheck.** Phase 4 draws
+colour-coded team territories on the map; Phase 3's own blockface layer (all
+2,760 at once, unpartitioned) is still not rendered, but territories cover the
+practical need: every reachable blockface is drawn once a team count is picked.
 
 ---
 
@@ -304,7 +306,7 @@ streets you know.
 
 ---
 
-## Phase 4 — Territories for N teams
+## Phase 4 — Territories for N teams (Done)
 
 Balanced, **contiguous** partitioning of blockfaces into N territories weighted
 by workload minutes, seeded outward from the hub, with no street split between
@@ -313,6 +315,58 @@ small enough (median 17 min, max 52) for a ~10% balance to be achievable.
 
 **Verify:** teams 1-8 produce N contiguous colour-coded areas with per-team
 minutes within ~10%; no blockface in two territories (asserted).
+
+### How a territory is grown
+
+`territory.py` works on **street units**, not raw blockfaces: all of one
+street's touching blockfaces (shared span, shared geometry node, or within
+200 m) form one indivisible unit, so a street is never split between teams.
+The only exception is a street bigger than `1.2 x` a team's whole share, which
+is cut in house-number order and **reported in `split_streets`**, never hidden
+(no street needs this at an 800 m radius on real data).
+
+1. Units get an adjacency graph (shared intersection nodes, plus centroid
+   proximity up to 250 m so parallel streets without a shared node still touch).
+2. N seeds spread outward from the hub: nearest unit first, then repeatedly the
+   unassigned unit farthest from all chosen seeds — spatially spread, hub-anchored.
+3. Regions grow greedily: the lightest team claims its nearest adjacent unit,
+   so territories stay connected while workloads stay level.
+4. Boundary trades then flatten the result: a unit moves to a neighbouring
+   team when that evens the pair out (variance objective with plateau moves,
+   so equal-weight units can cascade across the map; the best layout seen is
+   kept). A move that would cut the donor region in two is refused.
+
+Disconnected pockets (off-network blockfaces with no walkable neighbours) are
+handed whole to the lightest team, and that territory honestly reports
+`contiguous: false` instead of pretending.
+
+### Built
+
+- `backend/app/territory.py` — `build_territories(blockfaces, hub, teams)`
+  -> `TerritoryPlan` (territories, `split_streets`, `spread_pct`). Every input
+  blockface lands in exactly one territory — **asserted in the builder**, not
+  assumed.
+- `GET /api/territories?lat&lon&teams&radius_m` — walkable blockfaces around
+  the hub, split into teams, as a FeatureCollection with per-team summaries
+  (minutes, doors, stops, streets, contiguous) and per-blockface features
+  (`team`, `label`, `minutes`, `doors`). Off-network blockfaces draw as their
+  stop points so they never silently vanish.
+- Sidebar section "3. Team territories": off/1-8 chips, per-team legend with
+  colour dots, minutes, doors, street count, spread %; map layers colour every
+  blockface line (and off-network point) by team, with hover popups.
+
+### Verified
+
+- **318 backend tests** (24 new: 11 unit on a synthetic grid, 6 API, 1 offline,
+  6 against the real snapshot).
+- Real district, hub at 50 Cotham Road (Kew Junction), 800 m radius,
+  178 blockfaces / ~50 knocking hours: teams 1-8 all contiguous, spread
+  0.2% / 1.1% / 1.9% / 4.1% / 5.8% / 2.8% / 11.6% for 2-8 teams, no street
+  split. 8 teams runs slightly over the ~10% target because whole streets
+  are chunky at ~6 h/team shares; the test bound is 15%.
+- Exactly-once assignment asserted for every team count 1-8 on real data;
+  determinism asserted (same input -> byte-identical partition).
+- Offline test proves `/api/territories` never touches the network.
 
 ---
 
