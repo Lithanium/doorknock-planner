@@ -102,3 +102,12 @@ def test_territories_work_offline(offline_client):
     ).json()
     assert body["features"]
     assert {t["team"] for t in body["teams"]} == {1, 2}
+
+
+def test_route_planning_works_offline(offline_client):
+    body = offline_client.get(
+        "/api/route/plan",
+        params={"lat": -37.8060, "lon": 145.0300, "radius_m": 400},
+    ).json()
+    assert body["visits"]
+    assert body["metrics"]["total_minutes"] <= body["metrics"]["session_minutes"]

@@ -13,14 +13,16 @@ is proven to work**.
 | 3a | Collapse multi-unit clusters into stops | **Done** |
 | 3 | Blockfaces (the "human element", part 1) | **Backend done**, UI pending |
 | 4 | Territories for N teams | **Done** |
-| 5 | Routing with pamphlet capacity and priority | Not started |
+| 5 | Routing with pamphlet capacity and priority | **Done** |
 | 6 | Volunteer interface | Not started |
 | 7 | Field hardening | Not started |
 
-Current state: **338 backend tests + clean frontend typecheck.** Phase 4 draws
-colour-coded team territories on the map; Phase 3's own blockface layer (all
-2,760 at once, unpartitioned) is still not rendered, but territories cover the
-practical need: every reachable blockface is drawn once a team count is picked.
+Current state: **372 backend tests + clean frontend typecheck.** Phase 5 plans
+one pair's ordered session route (OR-Tools, pamphlet capacity, restocks,
+priority drops, session budget) and draws it on the map with a metrics panel.
+Phase 3's own blockface layer (all 2,760 at once, unpartitioned) is still not
+rendered, but territories cover the practical need: every reachable blockface
+is drawn once a team count is picked.
 
 ---
 
@@ -428,19 +430,89 @@ this hub, a 2-door Barkers Road remnant 280 m from the nearest other work.
 
 ---
 
-## Phase 5 — Routing with capacity and priority
+## Phase 5 — Routing with capacity and priority (Done)
 
-OR-Tools (`ortools==9.15.6755`, confirmed to have a cp314 arm64 wheel) with
-depot-copy reload stops that reset the pamphlet dimension, configurable
-pamphlets/take-up/dwell/speed/session length, disjunction penalties for
-priority, and a human-smoothing pass penalising turns, street changes, major-
-road crossings and re-walked segments.
+OR-Tools (`ortools==9.15.6755`) with depot-copy reload stops that reset the
+pamphlet dimension, configurable pamphlets/take-up/dwell/speed/session length,
+disjunction penalties for priority, and a human-smoothing pass penalising
+turns, street changes, major-road crossings and re-walked segments.
 
 **Verify:** no blockface split; restock stops appear exactly when the pamphlet
 count hits N; near-hub houses come early; totals respect the session budget;
 dropped houses are the farthest. A/B with capacity off must show restock
 walking time drop. Golden-file test on a fixed area and seed. Metrics panel:
 walk km, % walking vs knocking, restock trips, coverage %.
+
+### How the model is shaped
+
+`routing.py` solves one pair's session as a single-vehicle CVRP with a time
+budget, over **whole blockfaces** — the solver orders them, never splits one:
+
+- Node 0 is the hub; each blockface is a node whose service time is its dwell
+  (at the config's approach/per-door rates) plus walking its own length.
+- **Pamphlets are a routing dimension counting what is left in the bags**: the
+  pair starts full, each blockface subtracts `ceil(doors x take_up)`, the cumul
+  may never go negative, and only *reload copies of the hub* carry slack — so
+  the count can only jump back up at a restock, and only to a full load. Each
+  reload costs 5 minutes and is droppable free of charge, so unused slots
+  vanish rather than forcing detours.
+- The session length is a hard ceiling on the time dimension.
+- Every blockface carries a **disjunction penalty that falls with distance
+  from the hub**, so when the budget or supply cannot cover everything, the
+  far houses are dropped first, never the near ones.
+- Inter-blockface travel is centroid crow-flies x 1.35 (measured street-grid
+  detour factor) rather than a per-pair graph Dijkstra: the matrix for ~250
+  blockfaces stays instant and the error is uniform enough not to flip
+  orderings.
+- **First-solution strategy must be insertion-based** (`PARALLEL_CHEAPEST_
+  INSERTION`): arc-chaining strategies build routes that never pick up a
+  reload node, and local search cannot repair that because re-inserting a
+  dropped blockface needs its reload inserted in the same move. Search is
+  bounded by solution count, not wall time, so the same input always yields
+  the same route — the property the golden-file test pins.
+- A deterministic 2-opt **human-smoothing pass** then reverses sub-sequences
+  between restocks when that lowers a score charging walked metres plus
+  penalties for >60-degree turns, street changes, arterial crossings and
+  re-walking a street already worked — only keeping moves that still fit the
+  budget. It also breaks out-and-back ties toward serving near-hub houses
+  first, so a session cut short in the field leaves the far end undone.
+
+### Built
+
+- `backend/app/routing.py` — `plan_route(blockfaces, hub, RouteConfig)` ->
+  `RoutePlan` (ordered visits with arrive minute and pamphlets left, dropped
+  faces sorted farthest-first, metrics).
+- `GET /api/route/plan?lat&lon&radius_m&teams&team&pamphlets&take_up&
+  session_minutes&capacity` — same crow-flies scope as `/api/territories`;
+  with `teams > 1` the circle is carved first and the chosen team's share is
+  planned. Returns visits, dropped, metrics, a hub-to-hub `LineString` and the
+  served faces as a FeatureCollection.
+- Sidebar section "4. Pair route plan": team chips, pamphlets / session-minutes
+  inputs, capacity toggle, metrics panel (walk km, % walking vs knocking,
+  restock trips, coverage %, total time), step-by-step visit list, and a teal
+  dashed route line plus served-face highlight on the map.
+
+### Verified
+
+- **372 backend tests** (34 new: 22 unit on a synthetic street, 6 API, 1
+  offline, 5 against the real snapshot including the golden file).
+- Golden file (`tests/golden_route_plan.json`): Kew Junction hub, 400 m, 150
+  pamphlets, 180 min — byte-identical route on every run; regenerate
+  deliberately with `python -m tests.regen_route_golden`.
+- Real district: budget respected (179.5 of 180 min), dropped work is the far
+  edge (median dropped distance > median served), 30-pamphlet bags force
+  restocks with the count restored to full at each, and the capacity-off A/B
+  spends less time walking than capacity-on plus its restock trips.
+- Pamphlet count never goes negative anywhere in any plan (asserted per visit).
+- Offline test proves `/api/route/plan` never touches the network.
+
+### Honest limits
+
+- ~86 doors fit a 3-hour session at a 400 m radius hub — coverage 14%, which
+  is the throughput reality (~93 doors/pair-session district-wide), not a
+  solver failure. Prioritisation, not optimisation, is doing the work.
+- Dwell rates are still the uncalibrated Phase 3a figures; `RouteConfig`
+  keeps them as dials so timing a real session fixes the plans without code.
 
 ---
 

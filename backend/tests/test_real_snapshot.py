@@ -473,3 +473,101 @@ class TestRealTerritories:
         assert [
             [b.blockface_id for b in t.blockfaces] for t in first.territories
         ] == [[b.blockface_id for b in t.blockfaces] for t in second.territories]
+
+
+@pytest.fixture(scope="module")
+def route_faces(real_blockfaces):
+    """The golden-file area: a 400 m circle round the Kew Junction hub,
+    trimmed exactly the way `/api/route/plan` trims it."""
+    reachable = {
+        s.stop_id
+        for b in real_blockfaces
+        for s in b.stops
+        if haversine_m((s.lat, s.lon), TERRITORY_HUB) <= 400
+    }
+    return [
+        c for c in (b.clipped_to_stops(reachable) for b in real_blockfaces) if c
+    ]
+
+
+class TestRealRouting:
+    """Phase 5 against the real district: a session out of Kew Junction."""
+
+    def test_the_route_matches_its_golden_file(self, route_faces):
+        """Same area, same dials, same route - byte for byte. Regenerate with
+        `python -m tests.regen_route_golden` after a deliberate change."""
+        import json
+        from pathlib import Path
+
+        from app.routing import RouteConfig, plan_route
+
+        golden = json.loads(
+            (Path(__file__).parent / "golden_route_plan.json").read_text()
+        )
+        plan = plan_route(
+            route_faces,
+            TERRITORY_HUB,
+            RouteConfig(pamphlets=150, session_minutes=180),
+        )
+        assert [
+            {
+                "kind": v.kind,
+                "blockface_id": v.blockface.blockface_id if v.blockface else None,
+                "arrive_minute": round(v.arrive_minute, 1),
+                "pamphlets_left": v.pamphlets_left,
+            }
+            for v in plan.visits
+        ] == golden["visits"]
+        assert [f.blockface_id for f in plan.dropped] == golden["dropped"]
+        assert plan.metrics() == golden["metrics"]
+
+    def test_the_session_budget_holds_on_real_streets(self, route_faces):
+        from app.routing import RouteConfig, plan_route
+
+        plan = plan_route(
+            route_faces, TERRITORY_HUB, RouteConfig(pamphlets=150, session_minutes=180)
+        )
+        assert 0 < plan.total_minutes <= 180
+        assert plan.served
+
+    def test_what_a_real_session_drops_is_the_far_edge(self, route_faces):
+        from app.routing import RouteConfig, plan_route
+
+        plan = plan_route(
+            route_faces, TERRITORY_HUB, RouteConfig(pamphlets=150, session_minutes=180)
+        )
+        assert plan.dropped
+        served_median = sorted(
+            haversine_m(f.centroid, TERRITORY_HUB) for f in plan.served
+        )[len(plan.served) // 2]
+        dropped_median = sorted(
+            haversine_m(f.centroid, TERRITORY_HUB) for f in plan.dropped
+        )[len(plan.dropped) // 2]
+        assert dropped_median > served_median
+
+    def test_a_small_bag_forces_real_restocks(self, route_faces):
+        from app.routing import RouteConfig, plan_route
+
+        plan = plan_route(
+            route_faces, TERRITORY_HUB, RouteConfig(pamphlets=30, session_minutes=180)
+        )
+        assert plan.restock_trips >= 1
+        assert all(v.pamphlets_left >= 0 for v in plan.visits)
+
+    def test_capacity_off_spends_the_restock_time_on_doors_instead(self, route_faces):
+        from app.routing import RELOAD_SECONDS, RouteConfig, plan_route
+
+        on = plan_route(
+            route_faces, TERRITORY_HUB, RouteConfig(pamphlets=30, session_minutes=180)
+        )
+        off = plan_route(
+            route_faces,
+            TERRITORY_HUB,
+            RouteConfig(pamphlets=30, session_minutes=180, capacity_enabled=False),
+        )
+        assert off.restock_trips == 0 < on.restock_trips
+        assert (
+            off.walk_seconds
+            < on.walk_seconds + on.restock_trips * RELOAD_SECONDS
+        )
+        assert off.doors_served >= on.doors_served

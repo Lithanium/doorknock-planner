@@ -1,0 +1,194 @@
+{
+ "config": {
+  "pamphlets": 150,
+  "session_minutes": 180
+ },
+ "dropped": [
+  "highbury grove@-37.80754,145.03672#both/1",
+  "brougham street@-37.80635,145.03016#both/3",
+  "pakington street@-37.80554,145.03425#both/2",
+  "denmark street@-37.80952,145.02864#odd",
+  "stawell street@-37.80548,145.02910#both",
+  "wellington street@-37.80980,145.03632#both",
+  "fernhurst grove@-37.80727,145.02742#both",
+  "high street@-37.80753,145.02890#even",
+  "halfey lane@-37.80905,145.02808#both",
+  "gellibrand street@-37.81073,145.03197#both",
+  "studley park road@-37.80735,145.02878#even",
+  "princess street@-37.80548,145.02910#odd",
+  "studley park road@-37.80752,145.02881#odd",
+  "cotham road@-37.80754,145.03672#odd",
+  "denmark street@-37.80897,145.02874#odd",
+  "stratford avenue@-37.81037,145.02960#both",
+  "peel street@-37.80563,145.03283#both/2",
+  "charles street@-37.80963,145.03500#both",
+  "cotham road@-37.80754,145.03672#even",
+  "stanley street@-37.81086,145.03335#both",
+  "high street south@-37.80888,145.02751#odd",
+  "walpole street@-37.80554,145.03158#both/2",
+  "brougham street@-37.80635,145.03016#both/2",
+  "valentine avenue@-37.81026,145.03206#both/2",
+  "princess street@-37.80548,145.02910#even",
+  "valentine avenue@-37.81026,145.03206#both/1",
+  "denmark street@-37.80887,145.02876#odd",
+  "high street@-37.80548,145.03442#odd",
+  "high street south@-37.80888,145.02751#even",
+  "studley park road@-37.80735,145.02878#odd",
+  "pakington street@-37.80554,145.03425#both/1",
+  "high street@-37.80548,145.03442#even",
+  "charles street@-37.80739,145.03542#both",
+  "charles street@-37.80902,145.03511#both",
+  "princess street@-37.80651,145.02890#odd",
+  "wellington street@-37.80963,145.03500#both",
+  "princess street@-37.80738,145.02899#odd",
+  "denmark street@-37.80887,145.02876#even",
+  "gellibrand street@-37.81026,145.03206#both",
+  "princess street@-37.80651,145.02890#even",
+  "wellington street@-37.80907,145.03034#both",
+  "wellington street@-37.80901,145.02989#both",
+  "cotham road@-37.80739,145.03542#even",
+  "cotham road@-37.80739,145.03542#odd",
+  "princess street@-37.80738,145.02899#even",
+  "wellington street@-37.80945,145.03348#both",
+  "brougham street@-37.80635,145.03016#both/1",
+  "peel street@-37.80563,145.03283#both/1",
+  "walpole street@-37.80554,145.03158#both/1",
+  "high street@-37.80579,145.03355#odd",
+  "wellington street@-37.80919,145.03138#both",
+  "woodford avenue@-37.80663,145.03011#both",
+  "union street@-37.80724,145.03415#both",
+  "cotham road@-37.80733,145.03485#odd",
+  "wellington street@-37.80930,145.03225#both",
+  "high street@-37.80752,145.02901#even",
+  "high street@-37.80579,145.03355#even",
+  "cotham road@-37.80733,145.03485#even",
+  "street anthonys place@-37.80945,145.03348#both",
+  "high street@-37.80752,145.02901#odd",
+  "fenton avenue@-37.80907,145.03034#both",
+  "walton street@-37.80563,145.03283#both",
+  "high street@-37.80607,145.03277#odd",
+  "high street@-37.80705,145.03010#odd",
+  "brougham street@-37.80705,145.03010#both",
+  "derrick street@-37.80715,145.03333#both",
+  "high street@-37.80607,145.03277#even",
+  "walpole street@-37.80632,145.03141#both",
+  "cotham road@-37.80724,145.03415#odd",
+  "fenton way@-37.80737,145.03056#both",
+  "gellibrand street@-37.80930,145.03225#both"
+ ],
+ "hub": [
+  -37.8071644,
+  145.0320872
+ ],
+ "metrics": {
+  "blockfaces_dropped": 71,
+  "blockfaces_served": 13,
+  "capacity_enabled": true,
+  "coverage_pct": 14.0,
+  "doors_dropped": 530,
+  "doors_served": 86,
+  "knock_minutes": 148.5,
+  "knocking_pct": 82.7,
+  "pamphlets_per_load": 150,
+  "restock_minutes": 0.0,
+  "restock_trips": 0,
+  "session_minutes": 180,
+  "total_minutes": 179.5,
+  "walk_km": 2.48,
+  "walk_minutes": 31.0,
+  "walking_pct": 17.3
+ },
+ "radius_m": 400,
+ "visits": [
+  {
+   "arrive_minute": 0.0,
+   "blockface_id": null,
+   "kind": "hub",
+   "pamphlets_left": 150
+  },
+  {
+   "arrive_minute": 0.1,
+   "blockface_id": "cotham road@-37.80708,145.03268#even",
+   "kind": "blockface",
+   "pamphlets_left": 142
+  },
+  {
+   "arrive_minute": 15.7,
+   "blockface_id": "cotham road@-37.80708,145.03268#odd",
+   "kind": "blockface",
+   "pamphlets_left": 139
+  },
+  {
+   "arrive_minute": 24.2,
+   "blockface_id": "cotham road@-37.80724,145.03415#even",
+   "kind": "blockface",
+   "pamphlets_left": 138
+  },
+  {
+   "arrive_minute": 28.0,
+   "blockface_id": "cotham road@-37.80715,145.03333#odd",
+   "kind": "blockface",
+   "pamphlets_left": 137
+  },
+  {
+   "arrive_minute": 31.9,
+   "blockface_id": "high street@-37.80655,145.03144#even",
+   "kind": "blockface",
+   "pamphlets_left": 128
+  },
+  {
+   "arrive_minute": 50.0,
+   "blockface_id": "high street@-37.80655,145.03144#odd",
+   "kind": "blockface",
+   "pamphlets_left": 118
+  },
+  {
+   "arrive_minute": 70.6,
+   "blockface_id": "athenaeum place@-37.80641,145.03067#both",
+   "kind": "blockface",
+   "pamphlets_left": 117
+  },
+  {
+   "arrive_minute": 74.3,
+   "blockface_id": "high street@-37.80684,145.03066#odd",
+   "kind": "blockface",
+   "pamphlets_left": 105
+  },
+  {
+   "arrive_minute": 96.7,
+   "blockface_id": "high street@-37.80684,145.03066#even",
+   "kind": "blockface",
+   "pamphlets_left": 103
+  },
+  {
+   "arrive_minute": 102.0,
+   "blockface_id": "high street@-37.80689,145.03055#even",
+   "kind": "blockface",
+   "pamphlets_left": 102
+  },
+  {
+   "arrive_minute": 104.5,
+   "blockface_id": "high street@-37.80705,145.03010#even",
+   "kind": "blockface",
+   "pamphlets_left": 100
+  },
+  {
+   "arrive_minute": 109.7,
+   "blockface_id": "cotham road@-37.80697,145.03177#even",
+   "kind": "blockface",
+   "pamphlets_left": 87
+  },
+  {
+   "arrive_minute": 134.5,
+   "blockface_id": "queen street@-37.80919,145.03138#both",
+   "kind": "blockface",
+   "pamphlets_left": 64
+  },
+  {
+   "arrive_minute": 179.5,
+   "blockface_id": null,
+   "kind": "hub",
+   "pamphlets_left": 64
+  }
+ ]
+}

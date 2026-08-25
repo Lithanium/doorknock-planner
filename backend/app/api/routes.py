@@ -6,6 +6,7 @@ from app.blockface import Blockface
 from app.coverage import estimate_effort
 from app.geocode import normalise_street
 from app.osm.boundary import haversine_m, rings_to_geojson
+from app.routing import RouteConfig, plan_route
 from app.services import SnapshotMissingError, SnapshotStore
 from app.stops import build_stops
 from app.territory import MAX_TEAMS, build_territories
@@ -340,6 +341,111 @@ def territories(
         "split_streets": plan.split_streets,
         "teams": [t.to_dict() for t in plan.territories],
         "features": features,
+    }
+
+
+@router.get("/route/plan")
+def route_plan(
+    request: Request,
+    lat: float,
+    lon: float,
+    radius_m: float = Query(default=800, ge=50, le=3000),
+    teams: int = Query(default=1, ge=1, le=MAX_TEAMS),
+    team: int = Query(default=1, ge=1, le=MAX_TEAMS),
+    pamphlets: int = Query(default=200, ge=1, le=5000),
+    take_up: float = Query(default=1.0, gt=0.0, le=1.0),
+    session_minutes: float = Query(default=180, ge=10, le=600),
+    capacity: bool = Query(default=True),
+) -> dict:
+    """One pair's ordered session plan over its share of the hub's area.
+
+    Scope is the same crow-flies circle `/api/territories` uses; with
+    ``teams`` above 1 the circle is first carved into territories and the
+    chosen ``team``'s share is planned. ``capacity=false`` plans as if the
+    pamphlet supply were infinite - the A/B that shows what restocking costs.
+    """
+    _require_snapshot(request)
+    if team > teams:
+        raise HTTPException(status_code=400, detail="team must be at most teams")
+    store = _store(request)
+    reachable_ids = {
+        s.stop_id
+        for s in store.stops
+        if haversine_m((s.lat, s.lon), (lat, lon)) <= radius_m
+    }
+    faces = _blockfaces_within(store, reachable_ids)
+    if teams > 1:
+        territory_plan = build_territories(faces, (lat, lon), teams)
+        faces = territory_plan.territories[team - 1].blockfaces
+    config = RouteConfig(
+        pamphlets=pamphlets,
+        take_up=take_up,
+        session_minutes=session_minutes,
+        capacity_enabled=capacity,
+    )
+    plan = plan_route(faces, (lat, lon), config)
+
+    line: list[list[float]] = [[lon, lat]]
+    visits = []
+    for order, visit in enumerate(plan.visits):
+        face = visit.blockface
+        if face is not None:
+            line.append([face.centroid[1], face.centroid[0]])
+        elif order > 0:
+            line.append([lon, lat])
+        entry = {
+            "order": order,
+            "kind": visit.kind,
+            "arrive_minute": round(visit.arrive_minute, 1),
+            "pamphlets_left": visit.pamphlets_left,
+        }
+        if face is not None:
+            entry |= {
+                "blockface_id": face.blockface_id,
+                "label": face.label,
+                "street": face.street,
+                "doors": face.door_count,
+                "minutes": round(config.service_seconds(face) / 60, 1),
+            }
+        visits.append(entry)
+
+    return {
+        "lat": lat,
+        "lon": lon,
+        "radius_m": radius_m,
+        "teams": teams,
+        "team": team,
+        "metrics": plan.metrics(),
+        "visits": visits,
+        "dropped": [
+            {
+                "blockface_id": f.blockface_id,
+                "label": f.label,
+                "street": f.street,
+                "doors": f.door_count,
+                "hub_distance_m": round(haversine_m(f.centroid, (lat, lon)), 1),
+            }
+            for f in plan.dropped
+        ],
+        "geometry": {"type": "LineString", "coordinates": line},
+        "served_faces": {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "id": f.blockface_id,
+                    "geometry": {
+                        "type": "MultiLineString",
+                        "coordinates": [
+                            [[pt_lon, pt_lat] for pt_lat, pt_lon in chain]
+                            for chain in f.path
+                        ],
+                    },
+                    "properties": {"label": f.label, "street": f.street},
+                }
+                for f in plan.served
+            ],
+        },
     }
 
 
