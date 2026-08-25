@@ -269,12 +269,19 @@ def territories(
     teams: int = Query(ge=1, le=MAX_TEAMS),
     radius_m: float = Query(default=800, ge=50, le=3000),
 ) -> dict:
-    """Splits the hub's walkable blockfaces into balanced team territories."""
+    """Splits the hub's blockfaces into balanced team territories.
+
+    Scope is the crow-flies radius circle - the same circle and green dots the
+    map draws - so every street shown inside it gets a territory. Walking
+    distances gate nothing here: a stop just past a walk cutoff still needs
+    its pamphlet, and carving it out leaves holes in the middle of the plan.
+    """
     _require_snapshot(request)
     store = _store(request)
-    walk_m = store.walk_graph.distances_from((lat, lon), store.address_snaps, radius_m)
     reachable_ids = {
-        s.stop_id for s in store.stops if any(d.osm_id in walk_m for d in s.doors)
+        s.stop_id
+        for s in store.stops
+        if haversine_m((s.lat, s.lon), (lat, lon)) <= radius_m
     }
     faces = [
         b for b in store.blockfaces if any(s.stop_id in reachable_ids for s in b.stops)
