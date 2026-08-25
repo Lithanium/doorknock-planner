@@ -243,6 +243,12 @@ def _street_groups(faces: list[Blockface]) -> list[list[Blockface]]:
             by_node[node] = index
     for a in range(len(faces)):
         for b in range(a + 1, len(faces)):
+            if faces[a].path and faces[b].path:
+                # On-network blockfaces join through shared spans and nodes
+                # above; proximity alone must not bridge two runs of a street
+                # that a real gap separates, or one "unit" scatters pieces of
+                # a street across the map.
+                continue
             if haversine_m(faces[a].centroid, faces[b].centroid) <= UNIT_ADJACENCY_M:
                 union(a, b)
 
