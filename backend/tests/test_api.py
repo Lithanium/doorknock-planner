@@ -360,3 +360,72 @@ def test_territories_without_a_snapshot_explain_the_fix(empty_client):
     )
     assert response.status_code == 503
     assert "fetch-district" in response.json()["detail"]
+
+def test_route_plan_orders_a_session_over_the_fixture_district(client):
+    body = client.get(
+        "/api/route/plan",
+        params={"lat": -37.800, "lon": 145.050, "radius_m": 800},
+    ).json()
+    assert body["visits"][0]["kind"] == "hub"
+    assert body["visits"][-1]["kind"] == "hub"
+    assert body["metrics"]["total_minutes"] <= body["metrics"]["session_minutes"]
+    assert body["geometry"]["type"] == "LineString"
+    assert body["geometry"]["coordinates"][0] == [145.050, -37.800]
+    served = [v for v in body["visits"] if v["kind"] == "blockface"]
+    assert len(served) == body["metrics"]["blockfaces_served"] > 0
+    assert len(body["served_faces"]["features"]) == len(served)
+
+
+def test_route_plan_respects_a_tiny_pamphlet_supply(client):
+    body = client.get(
+        "/api/route/plan",
+        params={"lat": -37.800, "lon": 145.050, "radius_m": 800, "pamphlets": 3},
+    ).json()
+    assert all(v["pamphlets_left"] >= 0 for v in body["visits"])
+    reloads = [v for v in body["visits"] if v["kind"] == "reload"]
+    assert all(v["pamphlets_left"] == 3 for v in reloads)
+
+
+def test_route_plan_capacity_off_never_restocks(client):
+    body = client.get(
+        "/api/route/plan",
+        params={
+            "lat": -37.800,
+            "lon": 145.050,
+            "radius_m": 800,
+            "pamphlets": 3,
+            "capacity": "false",
+        },
+    ).json()
+    assert body["metrics"]["restock_trips"] == 0
+    assert all(v["kind"] != "reload" for v in body["visits"])
+
+
+def test_route_plan_plans_one_team_of_a_carved_up_area(client):
+    whole = client.get(
+        "/api/route/plan",
+        params={"lat": -37.800, "lon": 145.050, "radius_m": 800},
+    ).json()
+    team = client.get(
+        "/api/route/plan",
+        params={"lat": -37.800, "lon": 145.050, "radius_m": 800, "teams": 2, "team": 2},
+    ).json()
+    whole_total = whole["metrics"]["doors_served"] + whole["metrics"]["doors_dropped"]
+    team_total = team["metrics"]["doors_served"] + team["metrics"]["doors_dropped"]
+    assert 0 < team_total < whole_total
+
+
+def test_route_plan_rejects_a_team_beyond_the_team_count(client):
+    response = client.get(
+        "/api/route/plan",
+        params={"lat": -37.800, "lon": 145.050, "teams": 2, "team": 3},
+    )
+    assert response.status_code == 400
+
+
+def test_route_plan_without_a_snapshot_explains_the_fix(empty_client):
+    response = empty_client.get(
+        "/api/route/plan", params={"lat": -37.800, "lon": 145.050}
+    )
+    assert response.status_code == 503
+    assert "fetch-district" in response.json()["detail"]

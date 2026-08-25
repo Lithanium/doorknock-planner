@@ -8,6 +8,7 @@ import {
   type GeocodeCandidate,
   type Health,
   type HubPreview,
+  type RoutePlan,
   type Territories,
   type WalkRoute,
 } from "./api";
@@ -43,6 +44,13 @@ export function App() {
   const [teams, setTeams] = useState(0);
   const [territories, setTerritories] = useState<Territories | null>(null);
   const [territoriesLoading, setTerritoriesLoading] = useState(false);
+  const [planTeam, setPlanTeam] = useState(1);
+  const [pamphlets, setPamphlets] = useState(200);
+  const [sessionMinutes, setSessionMinutes] = useState(180);
+  const [capacityOn, setCapacityOn] = useState(true);
+  const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
+  const [routePlanLoading, setRoutePlanLoading] = useState(false);
+  const [routePlanError, setRoutePlanError] = useState<string | null>(null);
   const searchToken = useRef(0);
   const territoryToken = useRef(0);
 
@@ -144,6 +152,38 @@ export function App() {
       })
       .catch((e: Error) => setError(e.message));
   }, [radiusM, hub]);
+
+  const planRoute = useCallback(() => {
+    if (!hub) return;
+    setRoutePlanLoading(true);
+    setRoutePlanError(null);
+    api
+      .routePlan({
+        lat: hub.lat,
+        lon: hub.lon,
+        radius_m: radiusM,
+        teams: Math.max(teams, 1),
+        team: planTeam,
+        pamphlets,
+        session_minutes: sessionMinutes,
+        capacity: capacityOn ? "true" : "false",
+      })
+      .then(setRoutePlan)
+      .catch((e: Error) => {
+        setRoutePlan(null);
+        setRoutePlanError(e.message);
+      })
+      .finally(() => setRoutePlanLoading(false));
+  }, [hub, radiusM, teams, planTeam, pamphlets, sessionMinutes, capacityOn]);
+
+  useEffect(() => {
+    setRoutePlan(null);
+    setRoutePlanError(null);
+  }, [hub, radiusM, teams]);
+
+  useEffect(() => {
+    if (planTeam > Math.max(teams, 1)) setPlanTeam(1);
+  }, [teams, planTeam]);
 
   useEffect(() => {
     const token = ++territoryToken.current;
@@ -343,6 +383,127 @@ export function App() {
           </section>
         )}
 
+        {hub && (
+          <section>
+            <h2>4. Pair route plan</h2>
+            {teams > 1 && (
+              <div className="radios">
+                {Array.from({ length: teams }, (_, i) => i + 1).map((option) => (
+                  <button
+                    key={option}
+                    className={option === planTeam ? "chip chip-on" : "chip"}
+                    onClick={() => setPlanTeam(option)}
+                  >
+                    Team {option}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="plan-controls">
+              <label>
+                Pamphlets per load
+                <input
+                  type="number"
+                  min={1}
+                  max={5000}
+                  value={pamphlets}
+                  onChange={(event) => setPamphlets(Number(event.target.value) || 1)}
+                />
+              </label>
+              <label>
+                Session minutes
+                <input
+                  type="number"
+                  min={10}
+                  max={600}
+                  value={sessionMinutes}
+                  onChange={(event) => setSessionMinutes(Number(event.target.value) || 10)}
+                />
+              </label>
+              <label className="plan-toggle">
+                <input
+                  type="checkbox"
+                  checked={capacityOn}
+                  onChange={(event) => setCapacityOn(event.target.checked)}
+                />
+                Pamphlet capacity limit
+              </label>
+            </div>
+            <button className="chip" onClick={planRoute} disabled={routePlanLoading}>
+              {routePlanLoading ? "Planning\u2026" : "Plan the session route"}
+            </button>
+            {routePlanError && <div className="error">{routePlanError}</div>}
+            {routePlan && !routePlanLoading && (
+              <>
+                <table className="stats">
+                  <tbody>
+                    <tr>
+                      <th>Walking</th>
+                      <td>
+                        {routePlan.metrics.walk_km} km · {routePlan.metrics.walking_pct}% of
+                        the time
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>Knocking</th>
+                      <td>
+                        {formatNumber(Math.round(routePlan.metrics.knock_minutes))} min ·{" "}
+                        {routePlan.metrics.knocking_pct}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>Restock trips</th>
+                      <td>{routePlan.metrics.restock_trips}</td>
+                    </tr>
+                    <tr>
+                      <th>Coverage</th>
+                      <td>
+                        {routePlan.metrics.coverage_pct}% ·{" "}
+                        {formatNumber(routePlan.metrics.doors_served)} of{" "}
+                        {formatNumber(
+                          routePlan.metrics.doors_served + routePlan.metrics.doors_dropped,
+                        )}{" "}
+                        doors
+                      </td>
+                    </tr>
+                    <tr>
+                      <th>Total time</th>
+                      <td>
+                        {formatNumber(Math.round(routePlan.metrics.total_minutes))} of{" "}
+                        {formatNumber(Math.round(routePlan.metrics.session_minutes))} min
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <details>
+                  <summary>Step-by-step ({routePlan.visits.length} steps)</summary>
+                  <ol className="plan-steps">
+                    {routePlan.visits.map((visit) => (
+                      <li key={visit.order}>
+                        {visit.kind === "hub" &&
+                          (visit.order === 0 ? "Leave the hub, bags full" : "Back at the hub")}
+                        {visit.kind === "reload" && "Restock at the hub"}
+                        {visit.kind === "blockface" && visit.label}
+                        <span className="muted">
+                          {" "}
+                          · {Math.round(visit.arrive_minute)} min ·{" "}
+                          {visit.pamphlets_left} left
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+                {routePlan.dropped.length > 0 && (
+                  <p className="hint">
+                    Doesn’t fit this session: {routePlan.dropped.length} blockfaces (
+                    {formatNumber(routePlan.metrics.doors_dropped)} doors), farthest first.
+                  </p>
+                )}
+              </>
+            )}
+          </section>
+        )}
+
         <section>
           <h2>Walking route check</h2>
           <button className={routeMode ? "chip chip-on" : "chip"} onClick={toggleRouteMode}>
@@ -442,6 +603,7 @@ export function App() {
         route={route}
         routePoints={routePoints}
         territories={territories}
+        routePlan={routePlan}
         onPick={pickFromMap}
       />
     </div>

@@ -14,7 +14,13 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
-import type { AddressFeatureCollection, District, Territories, WalkRoute } from "../api";
+import type {
+  AddressFeatureCollection,
+  District,
+  RoutePlan,
+  Territories,
+  WalkRoute,
+} from "../api";
 import { circlePolygon } from "../geo";
 
 const EMPTY: FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -65,6 +71,7 @@ interface Props {
   route: WalkRoute | null;
   routePoints: { lat: number; lon: number }[];
   territories: Territories | null;
+  routePlan: RoutePlan | null;
   onPick: (lat: number, lon: number) => void;
 }
 
@@ -76,6 +83,7 @@ export function MapView({
   route,
   routePoints,
   territories,
+  routePlan,
   onPick,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -174,6 +182,28 @@ export function MapView({
           "circle-opacity": 0.85,
           "circle-stroke-width": 1.5,
           "circle-stroke-color": "#ffffff",
+        },
+      });
+
+      map.addSource("plan-faces", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "plan-faces-lines",
+        type: "line",
+        source: "plan-faces",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#0f766e", "line-width": 6, "line-opacity": 0.55 },
+      });
+
+      map.addSource("plan-line", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "plan-line-line",
+        type: "line",
+        source: "plan-line",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#0f766e",
+          "line-width": 2.5,
+          "line-dasharray": [2, 1.5],
         },
       });
 
@@ -324,6 +354,19 @@ export function MapView({
         : EMPTY,
     );
   }, [ready, territories]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const lineSource = map.getSource("plan-line") as GeoJSONSource | undefined;
+    lineSource?.setData(
+      routePlan
+        ? { type: "Feature", properties: {}, geometry: routePlan.geometry }
+        : EMPTY,
+    );
+    const facesSource = map.getSource("plan-faces") as GeoJSONSource | undefined;
+    facesSource?.setData(routePlan ? (routePlan.served_faces as FeatureCollection) : EMPTY);
+  }, [ready, routePlan]);
 
   useEffect(() => {
     const map = mapRef.current;

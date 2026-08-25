@@ -141,6 +141,61 @@ export interface Territories {
   features: TerritoryFeature[];
 }
 
+export interface RoutePlanMetrics {
+  walk_km: number;
+  walk_minutes: number;
+  knock_minutes: number;
+  walking_pct: number;
+  knocking_pct: number;
+  restock_trips: number;
+  restock_minutes: number;
+  total_minutes: number;
+  session_minutes: number;
+  doors_served: number;
+  doors_dropped: number;
+  blockfaces_served: number;
+  blockfaces_dropped: number;
+  coverage_pct: number;
+  pamphlets_per_load: number;
+  capacity_enabled: boolean;
+}
+
+export interface RoutePlanVisit {
+  order: number;
+  kind: "hub" | "reload" | "blockface";
+  arrive_minute: number;
+  pamphlets_left: number;
+  blockface_id?: string;
+  label?: string;
+  street?: string;
+  doors?: number;
+  minutes?: number;
+}
+
+export interface RoutePlanDropped {
+  blockface_id: string;
+  label: string;
+  street: string;
+  doors: number;
+  hub_distance_m: number;
+}
+
+export interface RoutePlan {
+  lat: number;
+  lon: number;
+  radius_m: number;
+  teams: number;
+  team: number;
+  metrics: RoutePlanMetrics;
+  visits: RoutePlanVisit[];
+  dropped: RoutePlanDropped[];
+  geometry: LineString;
+  served_faces: {
+    type: "FeatureCollection";
+    features: Feature<MultiLineString, { label: string; street: string }>[];
+  };
+}
+
 export interface ReverseResult {
   label: string;
   lat: number;
@@ -175,4 +230,14 @@ export const api = {
     get<WalkRoute>("/api/walk/route", { from_lat, from_lon, to_lat, to_lon }),
   territories: (lat: number, lon: number, teams: number, radius_m: number) =>
     get<Territories>("/api/territories", { lat, lon, teams, radius_m }),
+  routePlan: (params: {
+    lat: number;
+    lon: number;
+    radius_m: number;
+    teams: number;
+    team: number;
+    pamphlets: number;
+    session_minutes: number;
+    capacity: string;
+  }) => get<RoutePlan>("/api/route/plan", params),
 };
