@@ -320,17 +320,14 @@ TERRITORY_HUB = (-37.8071644, 145.0320872)  # 50 Cotham Road, near Kew Junction
 
 
 @pytest.fixture(scope="module")
-def hub_faces(real_snapshot, real_blockfaces):
-    from app.walkgraph import WalkGraph
-
-    graph = WalkGraph(real_snapshot.ways)
-    snaps = graph.snap_addresses(real_snapshot.addresses)
-    walk_m = graph.distances_from(TERRITORY_HUB, snaps, 800)
+def hub_faces(real_blockfaces):
+    """Blockfaces in scope for the hub, mirroring `/api/territories`: every
+    blockface with a stop inside the crow-flies radius circle the map draws."""
     reachable = {
         s.stop_id
         for b in real_blockfaces
         for s in b.stops
-        if any(d.osm_id in walk_m for d in s.doors)
+        if haversine_m((s.lat, s.lon), TERRITORY_HUB) <= 800
     }
     return [b for b in real_blockfaces if any(s.stop_id in reachable for s in b.stops)]
 
