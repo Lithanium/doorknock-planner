@@ -171,7 +171,13 @@ def build_territories(
 
 
 def _face_nodes(face: Blockface) -> set[NodeKey]:
-    return {node_key(point) for chain in face.path for point in chain}
+    """The nodes of the run's *whole* span, not just the part being knocked.
+
+    A run clipped to the session radius still adjoins the blocks it always
+    did - a pair walks between them along the street - so topology must come
+    from the untrimmed span or every trimmed boundary would look like a gap.
+    """
+    return set(face.network_nodes)
 
 
 def _span_base(face: Blockface) -> str:

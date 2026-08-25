@@ -121,6 +121,8 @@ export interface TerritoryFeature {
     street: string;
     minutes: number;
     doors: number;
+    /** Trimmed at the session radius, so the run stops part-way along its block. */
+    clipped: boolean;
   };
 }
 

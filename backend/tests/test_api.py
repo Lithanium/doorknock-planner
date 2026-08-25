@@ -320,6 +320,34 @@ def test_territories_reject_zero_teams(client):
     assert response.status_code == 422
 
 
+def test_territories_never_reach_beyond_the_radius(client):
+    """A blockface that only touches the radius must be trimmed to the part
+    inside it, not walked end to end."""
+    tight = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 1, "radius_m": 100},
+    ).json()
+    wide = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 1, "radius_m": 800},
+    ).json()
+    assert tight["total_minutes"] < wide["total_minutes"]
+    assert sum(f["properties"]["doors"] for f in tight["features"]) < sum(
+        f["properties"]["doors"] for f in wide["features"]
+    )
+
+
+def test_a_trimmed_session_keeps_the_reachable_stops(client):
+    preview = client.get(
+        "/api/hub/preview", params={"lat": -37.800, "lon": 145.050, "radius_m": 800}
+    ).json()
+    body = client.get(
+        "/api/territories",
+        params={"lat": -37.800, "lon": 145.050, "teams": 2, "radius_m": 800},
+    ).json()
+    assert body["blockface_count"] == preview["walk"]["blockfaces_within"]
+
+
 def test_territories_without_a_snapshot_explain_the_fix(empty_client):
     response = empty_client.get(
         "/api/territories",

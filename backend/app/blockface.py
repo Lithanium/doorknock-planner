@@ -3,8 +3,8 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter, defaultdict
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Container, Iterable, Sequence
+from dataclasses import dataclass, field, replace
 
 from app.geocode import normalise_street, spatial_clusters
 from app.osm.boundary import Point, assemble_rings, haversine_m
@@ -119,10 +119,43 @@ class Blockface:
     length_m: float
     path: tuple[tuple[Point, ...], ...] = ()
     off_network: bool = False
+    clipped: bool = False
+    network_nodes: frozenset[NodeKey] = frozenset()
+    """The untrimmed span's nodes, for deciding which runs touch on the ground.
+
+    Kept separate from `path` because clipping a run to a session radius
+    shortens what a pair walks but changes nothing about which blocks adjoin
+    which. Territory contiguity has to be judged on the street network, not on
+    this session's extents.
+    """
 
     @property
     def stop_count(self) -> int:
         return len(self.stops)
+
+    def clipped_to_stops(self, keep: Container[str]) -> Blockface | None:
+        """This blockface with only `keep`'s stops, or None if none survive.
+
+        A session radius cuts through the middle of blocks, and a blockface
+        that merely *touches* the radius must not drag the rest of its street
+        along: at a 100 m radius around Kew Junction that pulled in 42
+        out-of-radius stops against 17 inside it. The run is trimmed to the
+        stops that qualify, and its geometry and walking length are trimmed
+        with them so the map and the workload agree.
+        """
+        kept = tuple(s for s in self.stops if s.stop_id in keep)
+        if len(kept) == len(self.stops):
+            return self
+        if not kept:
+            return None
+        path = _trim_path(self.path, kept)
+        return replace(
+            self,
+            stops=kept,
+            path=path,
+            length_m=_path_length(path) if path else _stop_chain_length(kept),
+            clipped=True,
+        )
 
     @property
     def door_count(self) -> int:
@@ -197,6 +230,7 @@ class Blockface:
             "walk_minutes": round(self.walk_minutes, 1),
             "minutes": round(self.minutes, 1),
             "off_network": self.off_network,
+            "clipped": self.clipped,
         }
 
 
@@ -434,8 +468,94 @@ def _fallback_blockfaces(
 
 def _chain_length(stops: list[Stop]) -> float:
     """Fallback run length: walking the stops in house-number order."""
+    return _stop_chain_length(stops)
+
+
+def _stop_chain_length(stops: Sequence[Stop]) -> float:
     ordered = sorted(stops, key=lambda s: sort_key(s.number))
     return sum(haversine_m(a.point, b.point) for a, b in zip(ordered, ordered[1:]))
+
+
+STOP_FRONTAGE_M = 10.0
+"""Half a house frontage, so a trimmed run is not a zero-length point."""
+
+
+def _path_length(path: tuple[tuple[Point, ...], ...]) -> float:
+    return sum(
+        haversine_m(a, b) for chain in path for a, b in zip(chain, chain[1:])
+    )
+
+
+def _trim_path(
+    path: tuple[tuple[Point, ...], ...], stops: Sequence[Stop]
+) -> tuple[tuple[Point, ...], ...]:
+    """Cuts each chain back to the stretch its own stops actually occupy.
+
+    Every stop is attributed to the single chain it lies closest to, so a span
+    made of several disjoint chains only keeps the ones still being knocked.
+    """
+    if not path:
+        return ()
+    assigned: dict[int, list[float]] = defaultdict(list)
+    for stop in stops:
+        best: tuple[float, int, float] | None = None
+        for index, chain in enumerate(path):
+            offset, along = _project_onto_chain(chain, stop.point)
+            if best is None or offset < best[0]:
+                best = (offset, index, along)
+        if best is not None:
+            assigned[best[1]].append(best[2])
+    trimmed = []
+    for index, chain in enumerate(path):
+        alongs = assigned.get(index)
+        if not alongs:
+            continue
+        piece = _slice_chain(
+            chain, min(alongs) - STOP_FRONTAGE_M, max(alongs) + STOP_FRONTAGE_M
+        )
+        if len(piece) >= 2:
+            trimmed.append(piece)
+    return tuple(trimmed)
+
+
+def _project_onto_chain(chain: tuple[Point, ...], point: Point) -> tuple[float, float]:
+    """(distance to the chain, distance along it) for the nearest point on it."""
+    best = (math.inf, 0.0)
+    travelled = 0.0
+    for a, b in zip(chain, chain[1:]):
+        snapped, offset = project_to_segment(point, a, b)
+        if offset < best[0]:
+            best = (offset, travelled + haversine_m(a, snapped))
+        travelled += haversine_m(a, b)
+    return best
+
+
+def _slice_chain(chain: tuple[Point, ...], start_m: float, end_m: float) -> tuple[Point, ...]:
+    """The sub-polyline between two distances along a chain, ends interpolated."""
+    total = _path_length((chain,))
+    start_m, end_m = max(0.0, start_m), min(total, end_m)
+    if end_m <= start_m:
+        return ()
+    points: list[Point] = []
+    travelled = 0.0
+    for a, b in zip(chain, chain[1:]):
+        segment = haversine_m(a, b)
+        if segment == 0:
+            continue
+        finish = travelled + segment
+        if finish >= start_m and travelled <= end_m:
+            head = _interpolate(a, b, (max(start_m, travelled) - travelled) / segment)
+            tail = _interpolate(a, b, (min(end_m, finish) - travelled) / segment)
+            if not points:
+                points.append(head)
+            if tail != points[-1]:
+                points.append(tail)
+        travelled = finish
+    return tuple(points)
+
+
+def _interpolate(a: Point, b: Point, fraction: float) -> Point:
+    return (a[0] + (b[0] - a[0]) * fraction, a[1] + (b[1] - a[1]) * fraction)
 
 
 def _split_by_side(
@@ -453,6 +573,7 @@ def _split_by_side(
     for stop in stops:
         sides[parity(stop.number) if busy else BOTH].append(stop)
 
+    nodes = frozenset(node_key(point) for chain in path for point in chain)
     faces = []
     for side, members in sorted(sides.items()):
         ordered = sorted(members, key=lambda s: sort_key(s.number))
@@ -470,6 +591,7 @@ def _split_by_side(
                     length_m=part_length_m,
                     path=path,
                     off_network=off_network,
+                    network_nodes=nodes,
                 )
             )
     return faces

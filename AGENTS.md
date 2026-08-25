@@ -122,6 +122,25 @@ test` works on a fresh clone.
   split between teams" means grouping each street's touching blockfaces first;
   only a street bigger than 1.2x a team's whole share is cut (in house-number
   order), and it is reported in `split_streets`, never silently.
+- **The session radius must clip blockfaces, not select them.** A blockface
+  that merely touches the radius used to be taken whole, walking a pair down
+  the rest of the street: at a 100 m radius, 42 of 59 assigned stops were
+  *outside* it. `Blockface.clipped_to_stops` trims the run, its geometry and
+  its walking length together. Radius options are 100-800 m; 1 km+ is too far
+  from a hub to walk.
+- **Trimming geometry must not trim topology.** `Blockface.network_nodes` keeps
+  the untrimmed span's nodes precisely because territory adjacency is a fact
+  about the street network, not about this session's extents. Derive adjacency
+  from `path` instead and every clipped boundary reads as a gap, which makes
+  every territory non-contiguous.
+- **Territory balance is not within 10% district-wide, and never was.** Worst
+  spread over 2-8 teams at 800 m: Kew Junction 22.7%, Kew East 19.1%, Balwyn
+  North 30.4% (Phase 4 was only ever measured at Kew Junction, where it read
+  11.6%). 2-5 teams are fine (<3% at Kew Junction). The cause is whole-street
+  granularity: at 8 teams the share is 313 min and High Street alone is a
+  277-minute unit. `OVERSIZE_TOLERANCE = 0.8` fixes it (8 teams -> 8.9%) but
+  splits a street between teams, which is a campaign call, so it is left at
+  1.2. Do not "fix" the balance by loosening the test.
 
 ## Throughput reality
 

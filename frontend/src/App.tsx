@@ -20,7 +20,7 @@ interface Hub {
   label: string;
 }
 
-const RADIUS_OPTIONS = [400, 600, 800, 1000, 1500];
+const RADIUS_OPTIONS = [100, 200, 400, 600, 800];
 const TEAM_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
 export function App() {

@@ -17,7 +17,7 @@ is proven to work**.
 | 6 | Volunteer interface | Not started |
 | 7 | Field hardening | Not started |
 
-Current state: **318 backend tests + clean frontend typecheck.** Phase 4 draws
+Current state: **338 backend tests + clean frontend typecheck.** Phase 4 draws
 colour-coded team territories on the map; Phase 3's own blockface layer (all
 2,760 at once, unpartitioned) is still not rendered, but territories cover the
 practical need: every reachable blockface is drawn once a team count is picked.
@@ -340,6 +340,30 @@ Disconnected pockets (off-network blockfaces with no walkable neighbours) are
 handed whole to the lightest team, and that territory honestly reports
 `contiguous: false` instead of pretending.
 
+### The session radius is a hard boundary
+
+A blockface that merely *touches* the radius used to be taken **whole**, so a
+pair got sent down the rest of the street. It was severe at small radii: at
+100 m around Kew Junction, **42 of the 59 assigned stops were outside the
+radius**; at 800 m, 234 of 1,400.
+
+`Blockface.clipped_to_stops` now trims a run to the stops that qualify, and
+trims its geometry and walking length with them so the map and the workload
+agree. Nothing in-radius is lost and no blockface is dropped for being
+partial — at every radius tested, out-of-radius stops went to zero while the
+blockface count stayed the same. Trimmed runs are flagged `clipped` and the map
+popup says "trimmed at the radius".
+
+Topology had to be split from geometry to make this work: `Blockface.
+network_nodes` keeps the *untrimmed* span's nodes, because two blocks still
+adjoin each other on the ground however little of them this session covers.
+Without that, every trimmed boundary looked like a gap and territories came
+out non-contiguous.
+
+Radius options are now **100 / 200 / 400 / 600 / 800 m** (1 km and 1.5 km were
+too far to walk from a hub). At Kew Junction those hold 18 / 83 / 368 / 778 /
+1,354 doors, or 0.5 to 37.8 knocking hours.
+
 ### Built
 
 - `backend/app/territory.py` — `build_territories(blockfaces, hub, teams)`
@@ -359,14 +383,39 @@ handed whole to the lightest team, and that territory honestly reports
 
 - **318 backend tests** (24 new: 11 unit on a synthetic grid, 6 API, 1 offline,
   6 against the real snapshot).
+- **338 backend tests.**
 - Real district, hub at 50 Cotham Road (Kew Junction), 800 m radius,
-  178 blockfaces / ~50 knocking hours: teams 1-8 all contiguous, spread
-  0.2% / 1.1% / 1.9% / 4.1% / 5.8% / 2.8% / 11.6% for 2-8 teams, no street
-  split. 8 teams runs slightly over the ~10% target because whole streets
-  are chunky at ~6 h/team shares; the test bound is 15%.
+  178 blockfaces / 37.8 knocking hours: spread 0.3% / 1.3% / 1.4% / 2.9% for
+  2-5 teams, then 10.4% / 9.1% / 22.7% for 6-8, no street split.
 - Exactly-once assignment asserted for every team count 1-8 on real data;
   determinism asserted (same input -> byte-identical partition).
 - Offline test proves `/api/territories` never touches the network.
+
+### Balance is worse than first measured — two honest caveats
+
+**1. Phase 4's "~10%" only ever held at the one hub that was tested.** Measured
+worst spread over 2-8 teams at an 800 m radius, before any clipping: Kew
+Junction 11.6%, Kew East 11.1%, **Balwyn North 44.5%**. The target is not met
+district-wide and never was.
+
+**2. Respecting the radius makes high team counts harder, not easier.** A
+strict session holds less work, so shares shrink while whole-street units do
+not. Worst spread over 2-8 teams, untrimmed -> trimmed: Kew Junction
+11.6% -> 22.7%, Kew East 11.1% -> 19.1%, Balwyn North 44.5% -> **30.4%**
+(trimming *helps* there). Small team counts are unaffected: 2-5 teams stay
+under 3% at Kew Junction.
+
+The cause is granularity, not the search: at 8 teams the share is 313 min while
+**High Street alone is one 277-minute unit** (150 doors), because streets are
+kept whole by campaign preference. Setting `OVERSIZE_TOLERANCE` to 0.8 takes
+8 teams from 22.7% to 8.9% at the cost of splitting one street between two
+teams — a campaign decision, so it has **not** been applied. `split_streets`
+already reports any street this happens to.
+
+The test suite now records both facts rather than asserting a bound that only
+one hub satisfies: 2-5 teams must stay under 15%, 6-8 under 25%, and any
+non-contiguous territory must be explained by an off-network pocket (at this
+hub, a 2-door Barkers Road remnant 280 m from the nearest other work).
 
 ---
 

@@ -14,6 +14,7 @@ from app.blockface import (
     parity,
     split_into_parts,
 )
+from app.osm.boundary import haversine_m
 from app.osm.snapshot import Address, WalkWay
 from app.stops import build_stops
 
@@ -345,6 +346,95 @@ class TestWorkloadAndSplitting:
         faces = build_blockfaces(stops, WAYS)
         assert sum(f.stop_count for f in faces) == len(stops)
         assert len({f.blockface_id for f in faces}) == len(faces)
+
+
+class TestClippingToARadius:
+    """A session radius cuts through blocks; a blockface must not drag the
+    rest of its street along just because one end qualifies."""
+
+    def _quiet(self, faces):
+        return next(f for f in faces if f.street == "Quiet Street")
+
+    def test_keeping_every_stop_returns_the_same_object(self, faces):
+        face = self._quiet(faces)
+        assert face.clipped_to_stops({s.stop_id for s in face.stops}) is face
+
+    def test_keeping_no_stop_drops_the_blockface(self, faces):
+        assert self._quiet(faces).clipped_to_stops(set()) is None
+
+    def test_only_the_kept_stops_survive(self, faces):
+        face = self._quiet(faces)
+        keep = {face.stops[0].stop_id, face.stops[1].stop_id}
+        trimmed = face.clipped_to_stops(keep)
+        assert {s.stop_id for s in trimmed.stops} == keep
+        assert trimmed.clipped is True
+
+    def test_a_trimmed_run_reports_less_work(self, faces):
+        face = self._quiet(faces)
+        trimmed = face.clipped_to_stops({face.stops[0].stop_id})
+        assert trimmed.door_count < face.door_count
+        assert trimmed.minutes < face.minutes
+
+    def test_a_trimmed_run_walks_a_shorter_street(self, faces):
+        face = self._quiet(faces)
+        trimmed = face.clipped_to_stops({s.stop_id for s in face.stops[:2]})
+        assert trimmed.length_m < face.length_m
+        assert trimmed.walk_minutes < face.walk_minutes
+
+    def test_the_drawn_geometry_shrinks_with_the_run(self, faces):
+        """Otherwise the map shows a pair covering a street they never walk."""
+        face = self._quiet(faces)
+        trimmed = face.clipped_to_stops({s.stop_id for s in face.stops[:2]})
+        assert trimmed.path
+        assert all(len(chain) >= 2 for chain in trimmed.path)
+        assert _total_length(trimmed.path) < _total_length(face.path)
+
+    def test_a_single_stop_still_has_drawable_geometry(self, faces):
+        face = self._quiet(faces)
+        trimmed = face.clipped_to_stops({face.stops[0].stop_id})
+        assert trimmed.path and all(len(chain) >= 2 for chain in trimmed.path)
+
+    def test_the_trimmed_geometry_stays_on_the_original_street(self, faces):
+        face = self._quiet(faces)
+        trimmed = face.clipped_to_stops({s.stop_id for s in face.stops[:2]})
+        for chain in trimmed.path:
+            for point in chain:
+                assert min(
+                    haversine_m(point, p) for c in face.path for p in c
+                ) < 100
+
+    def test_labels_and_ranges_follow_the_trim(self, faces):
+        face = self._quiet(faces)
+        trimmed = face.clipped_to_stops({s.stop_id for s in face.stops[:2]})
+        assert trimmed.number_range == (face.stops[0].number, face.stops[1].number)
+        assert trimmed.label != face.label
+
+    def test_an_off_network_run_can_also_be_trimmed(self):
+        doors = [
+            _door("o1", -37.7000, 145.0500, "1", "Ghost Road"),
+            _door("o2", -37.7002, 145.0502, "3", "Ghost Road"),
+            _door("o3", -37.7004, 145.0504, "5", "Ghost Road"),
+        ]
+        [face] = build_blockfaces(build_stops(doors), WAYS)
+        trimmed = face.clipped_to_stops({face.stops[0].stop_id, face.stops[1].stop_id})
+        assert trimmed.stop_count == 2
+        assert trimmed.length_m < face.length_m
+
+    def test_the_side_and_crossing_rule_are_unchanged_by_trimming(self, faces):
+        for face in faces:
+            trimmed = face.clipped_to_stops({face.stops[0].stop_id})
+            assert trimmed.side == face.side
+            assert trimmed.one_side_per_pass == face.one_side_per_pass
+            assert trimmed.street == face.street
+
+    def test_payload_flags_a_trimmed_run(self, faces):
+        face = self._quiet(faces)
+        assert face.to_dict()["clipped"] is False
+        assert face.clipped_to_stops({face.stops[0].stop_id}).to_dict()["clipped"] is True
+
+
+def _total_length(path) -> float:
+    return sum(haversine_m(a, b) for chain in path for a, b in zip(chain, chain[1:]))
 
 
 class TestSplitIntoParts:

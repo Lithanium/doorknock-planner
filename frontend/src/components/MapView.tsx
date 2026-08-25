@@ -212,8 +212,14 @@ export function MapView({
         if (!feature) return;
         map.getCanvas().style.cursor = "pointer";
         const props = feature.properties ?? {};
-        // The blockface label already carries doors and minutes.
-        popup.setLngLat(event.lngLat).setText(`Team ${props.team}: ${props.label}`).addTo(map);
+        // The blockface label already carries doors and minutes. A clipped run
+        // stops part-way along its block, so say so rather than let the
+        // shortened line look like missing data.
+        const trimmed = props.clipped ? " (trimmed at the radius)" : "";
+        popup
+          .setLngLat(event.lngLat)
+          .setText(`Team ${props.team}: ${props.label}${trimmed}`)
+          .addTo(map);
       });
       map.on("mouseleave", "territories-lines", () => {
         map.getCanvas().style.cursor = "";

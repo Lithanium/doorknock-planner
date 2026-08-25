@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from app.blockface import Blockface
 from app.coverage import estimate_effort
 from app.geocode import normalise_street
 from app.osm.boundary import haversine_m, rings_to_geojson
@@ -15,6 +16,17 @@ router = APIRouter(prefix="/api")
 
 def _store(request: Request) -> SnapshotStore:
     return request.app.state.store
+
+
+def _blockfaces_within(store: SnapshotStore, reachable_ids: set[str]) -> list[Blockface]:
+    """The session's blockfaces, each trimmed to the stops inside the radius.
+
+    A blockface that merely touches the radius must not drag the rest of its
+    street into the session, so it is cut back to the part that qualifies
+    instead of being taken whole or dropped whole.
+    """
+    trimmed = (b.clipped_to_stops(reachable_ids) for b in store.blockfaces)
+    return [b for b in trimmed if b is not None]
 
 
 def _parse_bbox(bbox: str) -> tuple[float, float, float, float]:
@@ -234,10 +246,7 @@ def hub_preview(
     walkable_stops = [
         s for s in store.stops if any(d.osm_id in walk_m for d in s.doors)
     ]
-    reachable_ids = {s.stop_id for s in walkable_stops}
-    walkable_faces = [
-        b for b in store.blockfaces if any(s.stop_id in reachable_ids for s in b.stops)
-    ]
+    walkable_faces = _blockfaces_within(store, {s.stop_id for s in walkable_stops})
     return {
         "lat": lat,
         "lon": lon,
@@ -276,9 +285,7 @@ def territories(
     reachable_ids = {
         s.stop_id for s in store.stops if any(d.osm_id in walk_m for d in s.doors)
     }
-    faces = [
-        b for b in store.blockfaces if any(s.stop_id in reachable_ids for s in b.stops)
-    ]
+    faces = _blockfaces_within(store, reachable_ids)
     plan = build_territories(faces, (lat, lon), teams)
     total_minutes = sum(t.minutes for t in plan.territories)
     features = []
@@ -309,6 +316,7 @@ def territories(
                         "street": b.street,
                         "minutes": round(b.minutes, 1),
                         "doors": b.door_count,
+                        "clipped": b.clipped,
                     },
                 }
             )
