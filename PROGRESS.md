@@ -361,8 +361,9 @@ Without that, every trimmed boundary looked like a gap and territories came
 out non-contiguous.
 
 Radius options are now **100 / 200 / 400 / 600 / 800 m** (1 km and 1.5 km were
-too far to walk from a hub). At Kew Junction those hold 18 / 83 / 368 / 778 /
-1,354 doors, or 0.5 to 37.8 knocking hours.
+too far to walk from a hub). Territory scope is the crow-flies circle the map
+draws, so nothing inside it is left unplanned; at Kew Junction the 100 / 200 /
+400 / 800 m circles hold 50 / 192 / 616 / 2,101 doors.
 
 ### Built
 
@@ -385,37 +386,45 @@ too far to walk from a hub). At Kew Junction those hold 18 / 83 / 368 / 778 /
   6 against the real snapshot).
 - **338 backend tests.**
 - Real district, hub at 50 Cotham Road (Kew Junction), 800 m radius,
-  178 blockfaces / 37.8 knocking hours: spread 0.3% / 1.3% / 1.4% / 2.9% for
-  2-5 teams, then 10.4% / 9.1% / 22.7% for 6-8, no street split.
+  251 blockfaces / 2,101 doors: spread 0.0% / 0.9% / 1.9% / 1.2% / 3.8% /
+  3.4% / 3.6% for 2-8 teams, no street split.
 - Exactly-once assignment asserted for every team count 1-8 on real data;
   determinism asserted (same input -> byte-identical partition).
 - Offline test proves `/api/territories` never touches the network.
 
-### Balance is worse than first measured — two honest caveats
+### Balance: met at 800 m, and the reason it can fail
 
-**1. Phase 4's "~10%" only ever held at the one hub that was tested.** Measured
-worst spread over 2-8 teams at an 800 m radius, before any clipping: Kew
-Junction 11.6%, Kew East 11.1%, **Balwyn North 44.5%**. The target is not met
-district-wide and never was.
+Worst spread over 2-8 teams, measured at three hubs after the scope became the
+crow-flies circle:
 
-**2. Respecting the radius makes high team counts harder, not easier.** A
-strict session holds less work, so shares shrink while whole-street units do
-not. Worst spread over 2-8 teams, untrimmed -> trimmed: Kew Junction
-11.6% -> 22.7%, Kew East 11.1% -> 19.1%, Balwyn North 44.5% -> **30.4%**
-(trimming *helps* there). Small team counts are unaffected: 2-5 teams stay
-under 3% at Kew Junction.
+| Hub | 200 m | 400 m | 800 m |
+| --- | ----- | ----- | ----- |
+| Kew Junction | 55.7% | 11.8% | **3.8%** |
+| Balwyn North | 125.4% | 24.5% | **3.3%** |
+| Kew East | 138.0% | 52.9% | **10.8%** |
 
-The cause is granularity, not the search: at 8 teams the share is 313 min while
-**High Street alone is one 277-minute unit** (150 doors), because streets are
-kept whole by campaign preference. Setting `OVERSIZE_TOLERANCE` to 0.8 takes
-8 teams from 22.7% to 8.9% at the cost of splitting one street between two
-teams — a campaign decision, so it has **not** been applied. `split_streets`
-already reports any street this happens to.
+At the default 800 m the ~10% criterion holds at every hub tried, so the test
+bound is **10%** for all team counts 2-8, not a figure loosened to fit.
 
-The test suite now records both facts rather than asserting a bound that only
-one hub satisfies: 2-5 teams must stay under 15%, 6-8 under 25%, and any
-non-contiguous territory must be explained by an off-network pocket (at this
-hub, a 2-door Barkers Road remnant 280 m from the nearest other work).
+**Balance needs enough units to go round, and that is the real constraint.** A
+200 m circle holds 15-31 blockfaces; asking 8 teams to share it cannot come out
+even however good the search is. Team count has to scale with radius. The suite
+pins the shape of this rather than leaving it to be discovered in the field:
+2 teams stay balanced in a 200 m circle, 8 do not.
+
+Two earlier readings are worth recording because they were wrong in
+instructive ways. Under the old **walking-distance** scope the same hubs came
+out at 11.6% / 44.5% / 11.1% untrimmed and 22.7% / 30.4% / 19.1% trimmed — the
+44.5% because Phase 4 was only ever measured at Kew Junction, and the
+degradation because a strict radius shrinks a team's share while whole-street
+units stay the same size. Moving scope to the crow-flies circle put more work
+in each session and made both problems go away.
+
+`OVERSIZE_TOLERANCE` is therefore still 1.2 and no street is split: the case
+for tightening it to 0.8 disappeared with the numbers that motivated it.
+
+Any non-contiguous territory must be explained by an off-network pocket — at
+this hub, a 2-door Barkers Road remnant 280 m from the nearest other work.
 
 ---
 

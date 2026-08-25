@@ -133,14 +133,22 @@ test` works on a fresh clone.
   about the street network, not about this session's extents. Derive adjacency
   from `path` instead and every clipped boundary reads as a gap, which makes
   every territory non-contiguous.
-- **Territory balance is not within 10% district-wide, and never was.** Worst
-  spread over 2-8 teams at 800 m: Kew Junction 22.7%, Kew East 19.1%, Balwyn
-  North 30.4% (Phase 4 was only ever measured at Kew Junction, where it read
-  11.6%). 2-5 teams are fine (<3% at Kew Junction). The cause is whole-street
-  granularity: at 8 teams the share is 313 min and High Street alone is a
-  277-minute unit. `OVERSIZE_TOLERANCE = 0.8` fixes it (8 teams -> 8.9%) but
-  splits a street between teams, which is a campaign call, so it is left at
-  1.2. Do not "fix" the balance by loosening the test.
+- **Territory scope is the crow-flies circle, not walking distance.** A stop
+  just past a walk cutoff still needs its pamphlet, and gating on walking
+  leaves holes mid-plan. `/api/hub/preview` still reports *walking*
+  reachability, so the two panels legitimately disagree: at 800 m round Kew
+  Junction the circle holds 2,101 doors against ~1,354 within an 800 m walk.
+  Walking can never beat the straight line, so territories are always a
+  superset — that is the invariant the API test asserts.
+- **Territory balance is fine at 800 m and hopeless in a small circle.** Worst
+  spread over 2-8 teams: Kew Junction 3.8%, Balwyn North 3.3%, Kew East 10.8%
+  at 800 m; but 55.7% / 125.4% / 138.0% at 200 m, where a session holds only
+  15-31 blockfaces. **Team count must scale with radius** — the search cannot
+  divide work that is not there. Do not chase small-radius balance by
+  loosening the 10% test or by splitting streets.
+- Balance numbers move a lot with scope, so re-measure before quoting them.
+  Under the earlier walking-distance scope these same hubs read 22.7% / 30.4% /
+  19.1%, and Phase 4's original "~10%" claim came from testing one hub only.
 
 ## Throughput reality
 

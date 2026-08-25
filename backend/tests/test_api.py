@@ -337,7 +337,12 @@ def test_territories_never_reach_beyond_the_radius(client):
     )
 
 
-def test_a_trimmed_session_keeps_the_reachable_stops(client):
+def test_territories_cover_at_least_the_walkable_workload(client):
+    """The two panels scope differently on purpose: `hub/preview` reports what
+    is reachable within a real *walk*, while `territories` plans everything in
+    the crow-flies circle the map draws, so no street inside it is left out.
+    Walking a given distance can never beat the straight line, so territories
+    must be a superset - never fewer blockfaces than the walk reports."""
     preview = client.get(
         "/api/hub/preview", params={"lat": -37.800, "lon": 145.050, "radius_m": 800}
     ).json()
@@ -345,7 +350,7 @@ def test_a_trimmed_session_keeps_the_reachable_stops(client):
         "/api/territories",
         params={"lat": -37.800, "lon": 145.050, "teams": 2, "radius_m": 800},
     ).json()
-    assert body["blockface_count"] == preview["walk"]["blockfaces_within"]
+    assert body["blockface_count"] >= preview["walk"]["blockfaces_within"] > 0
 
 
 def test_territories_without_a_snapshot_explain_the_fix(empty_client):

@@ -320,16 +320,24 @@ TERRITORY_HUB = (-37.8071644, 145.0320872)  # 50 Cotham Road, near Kew Junction
 
 
 @pytest.fixture(scope="module")
-def hub_faces(real_blockfaces):
-    """Blockfaces in scope for the hub, mirroring `/api/territories`: every
-    blockface with a stop inside the crow-flies radius circle the map draws."""
-    reachable = {
+def hub_reachable(real_blockfaces):
+    """Stops inside the hub's crow-flies circle - the scope `/api/territories`
+    uses, and the circle the map draws."""
+    return {
         s.stop_id
         for b in real_blockfaces
         for s in b.stops
         if haversine_m((s.lat, s.lon), TERRITORY_HUB) <= 800
     }
-    return [b for b in real_blockfaces if any(s.stop_id in reachable for s in b.stops)]
+
+
+@pytest.fixture(scope="module")
+def hub_faces(real_blockfaces, hub_reachable):
+    """Blockfaces in scope for the hub, mirroring `/api/territories` exactly:
+    selected by having a stop in the circle, then **trimmed** to the stops that
+    are actually in it, the way `_blockfaces_within` does."""
+    trimmed = (b.clipped_to_stops(hub_reachable) for b in real_blockfaces)
+    return [b for b in trimmed if b is not None]
 
 
 class TestRealTerritories:
@@ -386,36 +394,44 @@ class TestRealTerritories:
             )
             assert assigned == all_ids
 
-    def test_small_team_counts_come_out_practically_balanced(self, hub_faces):
-        from app.territory import build_territories
+    def test_teams_come_out_practically_balanced(self, hub_faces):
+        """The Phase 4 acceptance criterion, at the default 800 m radius.
 
-        for teams in range(2, 6):
-            plan = build_territories(hub_faces, TERRITORY_HUB, teams)
-            assert plan.spread_pct <= 0.15, (
-                f"{teams} teams spread {plan.spread_pct:.0%}: "
-                f"{[round(t.minutes) for t in plan.territories]}"
-            )
-
-    def test_large_team_counts_are_limited_by_whole_street_granularity(self, hub_faces):
-        """A known Phase 4 limitation, recorded rather than hidden.
-
-        Once the radius is respected strictly, an 800 m session holds ~42
-        knocking hours; split 8 ways that is ~5 h a team, while a single
-        whole-street unit (High Street: 277 min, 150 doors) is most of one
-        team's day. Streets stay unsplit by campaign preference, so the
-        imbalance has nowhere to go. Measured: 10.4% / 9.1% / 22.7% at 6 / 7 /
-        8 teams. Tightening `OVERSIZE_TOLERANCE` to 0.8 takes 8 teams to 8.9%
-        at the cost of splitting one street - a campaign decision, not a
-        technical one.
+        Measured 0.0% / 0.9% / 1.9% / 1.2% / 3.8% / 3.4% / 3.6% for 2-8 teams,
+        so 10% is a real bound with headroom, not a bar lowered to fit.
         """
         from app.territory import build_territories
 
-        for teams in range(6, 9):
+        for teams in range(2, 9):
             plan = build_territories(hub_faces, TERRITORY_HUB, teams)
-            assert plan.spread_pct <= 0.25, (
+            assert plan.spread_pct <= 0.10, (
                 f"{teams} teams spread {plan.spread_pct:.0%}: "
                 f"{[round(t.minutes) for t in plan.territories]}"
             )
+
+    def test_a_small_radius_cannot_feed_many_teams(self, real_blockfaces):
+        """The honest limit, recorded rather than left to be discovered.
+
+        Balance needs enough units to go round. A 200 m circle round Kew
+        Junction holds ~31 blockfaces, so asking 8 teams to share it cannot
+        come out even however good the search is - measured 56% spread. This
+        is a "don't ask for that" limit, so the test pins the shape of it:
+        few teams stay balanced even in a small circle, many teams do not.
+        """
+        from app.territory import build_territories
+
+        reachable = {
+            s.stop_id
+            for b in real_blockfaces
+            for s in b.stops
+            if haversine_m((s.lat, s.lon), TERRITORY_HUB) <= 200
+        }
+        faces = [
+            c for c in (b.clipped_to_stops(reachable) for b in real_blockfaces) if c
+        ]
+        assert len(faces) < 50, "fixture assumption: a 200 m circle is a small session"
+        assert build_territories(faces, TERRITORY_HUB, 2).spread_pct <= 0.10
+        assert build_territories(faces, TERRITORY_HUB, 8).spread_pct > 0.10
 
     def test_any_non_contiguous_territory_is_an_off_network_pocket(self, hub_faces):
         """Contiguity is judged on the walk network, so the only honest gaps
