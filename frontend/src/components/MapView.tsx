@@ -8,13 +8,12 @@ import {
   type GeoJSONSource,
   type MapLayerMouseEvent,
   type MapMouseEvent,
-  type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import type { FeatureCollection } from "geojson";
 
-import type { AddressFeatureCollection, District, Territories, WalkRoute } from "../api";
+import type { AddressFeatureCollection, District, Territories, WalkRoute, Zones } from "../api";
 import { circlePolygon } from "../geo";
 
 const EMPTY: FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -28,6 +27,51 @@ export const TEAM_COLORS = [
   "#46f0f0",
   "#f032e6",
   "#9a6324",
+];
+
+/**
+ * One colour per hue family, ordered so the first six - all a greedy colouring
+ * ever reaches for on this district - are the most distinct.
+ *
+ * Chosen by maximising the smallest perceptual (CIE Lab) gap in the set rather
+ * than by eye. The earlier palette held crimson, maroon and brown at once,
+ * which read as three shades of red on a 4 px line. Yellow, olive and brown
+ * are excluded on purpose: yellow has no dark saturated form, so at a
+ * lightness that reads against a pale basemap it can only look muddy.
+ *
+ * Measured: smallest gap 33.7 across all eight and 40.3 across the first six;
+ * every colour sits at least 56 from the basemap's own lightness, and no two
+ * chromatic entries are within 27 degrees of hue.
+ */
+export const ZONE_COLORS = [
+  "#d81b45", // crimson
+  "#1a8f3c", // green
+  "#1f5fc4", // blue
+  "#00838f", // teal
+  "#e8590c", // orange
+  "#c2187e", // magenta
+  "#8e44c9", // violet
+  "#38424f", // slate
+];
+
+/**
+ * Zones carry a `palette` slot chosen server-side by greedy graph colouring, so
+ * no two touching zones share a colour. Doing it here would need a modulo over
+ * the zone index, which a data-driven style expression cannot express, and
+ * would put the same colour either side of a boundary.
+ */
+const ZONE_COLOR_EXPRESSION: ExpressionSpecification = [
+  "match",
+  ["get", "palette"],
+  0, ZONE_COLORS[0],
+  1, ZONE_COLORS[1],
+  2, ZONE_COLORS[2],
+  3, ZONE_COLORS[3],
+  4, ZONE_COLORS[4],
+  5, ZONE_COLORS[5],
+  6, ZONE_COLORS[6],
+  7, ZONE_COLORS[7],
+  "#64748b",
 ];
 
 const TEAM_COLOR_EXPRESSION: ExpressionSpecification = [
@@ -44,18 +88,26 @@ const TEAM_COLOR_EXPRESSION: ExpressionSpecification = [
   "#64748b",
 ];
 
-const BASEMAP_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    basemap: {
-      type: "raster",
-      tiles: ["https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © CARTO',
-    },
-  },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }],
-};
+const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+/**
+ * OpenFreeMap: no API key, no usage limits, self-hostable.
+ *
+ * CARTO's raster tiles were dropped in August 2026 when CARTO began serving an
+ * "API KEY REQUIRED" watermark in place of tiles its origin would not render
+ * (open water first - Port Phillip Bay and Bass Strait - while land still
+ * came back normally). Land tiles are next, and a basemap that degrades
+ * without warning is not something to take into the field.
+ *
+ * OpenStreetMap's own tile server was the other keyless option and was
+ * rejected: the OSMF tile usage policy asks apps not to use it.
+ *
+ * Attribution rides along in the source's TileJSON (OpenFreeMap, OpenMapTiles
+ * and OpenStreetMap), so MapLibre renders the credit without help from us.
+ *
+ * These are vector tiles, roughly 120-180 KB each against CARTO's ~17 KB
+ * rasters. That is the wrong direction for a phone on mobile data, and the
+ * reason Phase 6's local `.pmtiles` extract matters more than it did.
+ */
 
 interface Props {
   district: District | null;
@@ -65,6 +117,8 @@ interface Props {
   route: WalkRoute | null;
   routePoints: { lat: number; lon: number }[];
   territories: Territories | null;
+  zones: Zones | null;
+  showHouses: boolean;
   onPick: (lat: number, lon: number) => void;
 }
 
@@ -76,6 +130,8 @@ export function MapView({
   route,
   routePoints,
   territories,
+  zones,
+  showHouses,
   onPick,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -177,6 +233,51 @@ export function MapView({
         },
       });
 
+      map.addSource("zones", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "zone-boxes",
+        type: "line",
+        source: "zones",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: {
+          "line-color": ZONE_COLOR_EXPRESSION,
+          "line-width": 1.5,
+          "line-opacity": 0.55,
+          "line-dasharray": [3, 2],
+        },
+      });
+      // A white casing under the colour, so a zone reads against whatever the
+      // basemap draws underneath it.
+      map.addLayer({
+        id: "zone-casing",
+        type: "line",
+        source: "zones",
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 7, "line-opacity": 0.75 },
+      });
+      map.addLayer({
+        id: "zone-lines",
+        type: "line",
+        source: "zones",
+        filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": ZONE_COLOR_EXPRESSION, "line-width": 4, "line-opacity": 0.95 },
+      });
+      map.addLayer({
+        id: "zone-points",
+        type: "circle",
+        source: "zones",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: {
+          "circle-radius": 4,
+          "circle-color": ZONE_COLOR_EXPRESSION,
+          "circle-opacity": 0.9,
+          "circle-stroke-width": 1.2,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
       map.addSource("walk-route", { type: "geojson", data: EMPTY });
       map.addLayer({
         id: "walk-route-casing",
@@ -222,6 +323,17 @@ export function MapView({
           .addTo(map);
       });
       map.on("mouseleave", "territories-lines", () => {
+        map.getCanvas().style.cursor = "";
+        popup.remove();
+      });
+      map.on("mouseenter", "zone-lines", (event: MapLayerMouseEvent) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        map.getCanvas().style.cursor = "pointer";
+        const props = feature.properties ?? {};
+        popup.setLngLat(event.lngLat).setText(`${props.zone}: ${props.label}`).addTo(map);
+      });
+      map.on("mouseleave", "zone-lines", () => {
         map.getCanvas().style.cursor = "";
         popup.remove();
       });
@@ -324,6 +436,52 @@ export function MapView({
         : EMPTY,
     );
   }, [ready, territories]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    // Hidden rather than emptied, so the source stays loaded and the dots come
+    // straight back. Clicks still land: the map's click handler falls back to
+    // the raw coordinate when no dot is under the cursor.
+    map.setLayoutProperty("addresses-dots", "visibility", showHouses ? "visible" : "none");
+  }, [ready, showHouses]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const source = map.getSource("zones") as GeoJSONSource | undefined;
+    if (!zones) {
+      source?.setData(EMPTY);
+      return;
+    }
+    // The dashed bounding box shows the shape of the cut; the coloured lines
+    // show which streets actually belong to it, which is what a volunteer
+    // needs once the cut has been snapped to whole blockfaces.
+    const boxes = zones.zones.map((zone) => {
+      const [south, west, north, east] = zone.bbox;
+      return {
+        type: "Feature" as const,
+        id: `${zone.id}/box`,
+        geometry: {
+          type: "Polygon" as const,
+          coordinates: [
+            [
+              [west, south],
+              [east, south],
+              [east, north],
+              [west, north],
+              [west, south],
+            ],
+          ],
+        },
+        properties: { zone: zone.id, palette: zone.palette, label: zone.label },
+      };
+    });
+    source?.setData({
+      type: "FeatureCollection",
+      features: [...boxes, ...zones.features] as never[],
+    });
+  }, [ready, zones]);
 
   useEffect(() => {
     const map = mapRef.current;

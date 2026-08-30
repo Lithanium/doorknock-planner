@@ -9,6 +9,7 @@ from app.geocode import LocalGeocoder
 from app.osm.snapshot import DistrictSnapshot
 from app.stops import Stop, build_stops
 from app.walkgraph import EdgeSnap, WalkGraph
+from app.zones import ZonePlan, build_zones
 
 
 class SnapshotMissingError(RuntimeError):
@@ -38,6 +39,7 @@ class SnapshotStore:
         self._address_snaps: dict[str, EdgeSnap] | None = None
         self._stops: list[Stop] | None = None
         self._blockfaces: list[Blockface] | None = None
+        self._zones: dict[int, ZonePlan] = {}
         self._loaded_mtime: float | None = None
 
     @property
@@ -83,6 +85,18 @@ class SnapshotStore:
                 self._blockfaces = build_blockfaces(self._stops, snapshot.ways)
             return self._blockfaces
 
+    def zones(self, target_doors: int) -> ZonePlan:
+        """Zone plans are cached per target, since the UI flips between a few."""
+        with self._lock:
+            snapshot = self._snapshot_locked()
+            if self._stops is None:
+                self._stops = build_stops(snapshot.addresses)
+            if self._blockfaces is None:
+                self._blockfaces = build_blockfaces(self._stops, snapshot.ways)
+            if target_doors not in self._zones:
+                self._zones[target_doors] = build_zones(self._blockfaces, target_doors)
+            return self._zones[target_doors]
+
     @property
     def walk_graph(self) -> WalkGraph:
         with self._lock:
@@ -124,4 +138,5 @@ class SnapshotStore:
         self._address_snaps = None
         self._stops = None
         self._blockfaces = None
+        self._zones = {}
         self._loaded_mtime = None

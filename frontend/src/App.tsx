@@ -10,6 +10,7 @@ import {
   type HubPreview,
   type Territories,
   type WalkRoute,
+  type Zones,
 } from "./api";
 import { MapView, TEAM_COLORS } from "./components/MapView";
 import { formatNumber } from "./geo";
@@ -22,6 +23,15 @@ interface Hub {
 
 const RADIUS_OPTIONS = [100, 200, 400, 600, 800];
 const TEAM_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+const ZONE_TARGETS = [0, 400, 500, 600, 700, 800];
+
+/** The middle of the pack plus the extremes: a mean would hide the outliers. */
+function zoneDoorRange(zones: Zones): string {
+  const doors = zones.zones.map((z) => z.doors).sort((a, b) => a - b);
+  if (doors.length === 0) return "-";
+  const median = doors[Math.floor(doors.length / 2)];
+  return `${doors[0]}-${doors[doors.length - 1]}, median ${median}`;
+}
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -43,8 +53,13 @@ export function App() {
   const [teams, setTeams] = useState(0);
   const [territories, setTerritories] = useState<Territories | null>(null);
   const [territoriesLoading, setTerritoriesLoading] = useState(false);
+  const [showHouses, setShowHouses] = useState(true);
+  const [zoneTarget, setZoneTarget] = useState(0);
+  const [zones, setZones] = useState<Zones | null>(null);
+  const [zonesLoading, setZonesLoading] = useState(false);
   const searchToken = useRef(0);
   const territoryToken = useRef(0);
+  const zoneToken = useRef(0);
 
   useEffect(() => {
     api
@@ -169,6 +184,31 @@ export function App() {
         if (token === territoryToken.current) setTerritoriesLoading(false);
       });
   }, [teams, radiusM, hub]);
+
+  useEffect(() => {
+    const token = ++zoneToken.current;
+    if (zoneTarget === 0) {
+      setZones(null);
+      setZonesLoading(false);
+      return;
+    }
+    setZonesLoading(true);
+    api
+      .zones(zoneTarget)
+      .then((z) => {
+        if (token !== zoneToken.current) return;
+        setZones(z);
+        setError(null);
+      })
+      .catch((e: Error) => {
+        if (token !== zoneToken.current) return;
+        setZones(null);
+        setError(e.message);
+      })
+      .finally(() => {
+        if (token === zoneToken.current) setZonesLoading(false);
+      });
+  }, [zoneTarget]);
 
   if (health && !health.snapshot_available) {
     return (
@@ -344,6 +384,63 @@ export function App() {
         )}
 
         <section>
+          <h2>4. Electorate zones</h2>
+          <p className="muted">
+            Cuts the whole district into connected patches of roughly this many doors,
+            independently of any hub.
+          </p>
+          <div className="radios">
+            {ZONE_TARGETS.map((option) => (
+              <button
+                key={option}
+                className={option === zoneTarget ? "chip chip-on" : "chip"}
+                onClick={() => setZoneTarget(option)}
+              >
+                {option === 0 ? "off" : `${option} doors`}
+              </button>
+            ))}
+          </div>
+          {zonesLoading && <p className="muted">cutting zones…</p>}
+          {zones && !zonesLoading && (
+            <>
+              <table className="stats">
+                <tbody>
+                  <tr>
+                    <th>Zones</th>
+                    <td>{formatNumber(zones.zone_count)}</td>
+                  </tr>
+                  <tr>
+                    <th>Doors per zone</th>
+                    <td>
+                      {zoneDoorRange(zones)} (target {zones.target_doors})
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Doors covered</th>
+                    <td>
+                      {formatNumber(zones.covered_doors)} of {formatNumber(zones.total_doors)} (
+                      {zones.coverage_pct}%)
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Left out</th>
+                    <td>
+                      {formatNumber(zones.dropped_doors)} doors in {zones.dropped_blockfaces}{" "}
+                      stranded runs
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className="hint">
+                Dashed boxes show each cut; solid lines are the streets that ended up in it.
+                {zones.split_streets.length > 0 &&
+                  ` ${zones.split_streets.length} streets are longer than one zone and span two.`}
+              </p>
+            </>
+          )}
+        </section>
+
+        <section>
           <h2>Walking route check</h2>
           <button className={routeMode ? "chip chip-on" : "chip"} onClick={toggleRouteMode}>
             {routeMode ? "Route mode on — click two houses" : "Check a walking route"}
@@ -429,8 +526,27 @@ export function App() {
           </section>
         )}
 
+        <section>
+          <h2>Map display</h2>
+          <button
+            className={showHouses ? "chip chip-on" : "chip"}
+            onClick={() => setShowHouses((on) => !on)}
+          >
+            {showHouses ? "House dots on" : "House dots off"}
+          </button>
+          <p className="hint">
+            {showHouses
+              ? "Hide the house dots to read the zone and territory colours more clearly."
+              : "Dots hidden. Clicking the map still sets a hub, but snaps to the nearest address rather than the one under the cursor."}
+          </p>
+        </section>
+
         <footer className="muted">
-          {addresses && <>{formatNumber(addresses.count)} pins drawn</>}
+          {addresses && (
+            <>
+              {formatNumber(addresses.count)} pins {showHouses ? "drawn" : "hidden"}
+            </>
+          )}
         </footer>
       </aside>
 
@@ -442,6 +558,8 @@ export function App() {
         route={route}
         routePoints={routePoints}
         territories={territories}
+        zones={zones}
+        showHouses={showHouses}
         onPick={pickFromMap}
       />
     </div>

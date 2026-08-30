@@ -146,6 +146,24 @@ test` works on a fresh clone.
   15-31 blockfaces. **Team count must scale with radius** — the search cannot
   divide work that is not there. Do not chase small-radius balance by
   loosening the 10% test or by splitting streets.
+- **Zones (`zones.py`) are a different thing from territories.** Territories
+  split one hub's radius among N teams; zones cut the *whole* electorate into
+  fixed-size connected patches with no hub involved. Recursive proportional
+  median splits (a KD-tree), cutting between whole blockfaces. At the offered
+  400-800 door targets every zone lands within 15% of target and coverage is
+  99.8-100%; a 100-door target is looser (97% within +/-25%) because a
+  blockface is ~9 doors and some are 40+.
+- **A street can span two zones and that is not a bug.** High Street holds 150
+  doors, so no 100-door zone can contain it. `split_streets` reports every
+  street it happens to. What *is* guaranteed is that no blockface is split.
+- **Zone colours: 8, one per hue family, picked by maximising the smallest CIE
+  Lab gap.** A greedy colouring needs only 5-6 at any offered target, so eight
+  is headroom. Do not extend the palette by adding more hues: at 12 the search
+  is forced into dark yellow (olive) and a second red, which is what made the
+  first attempt unreadable. Yellow has no dark saturated form, so it cannot
+  both read on a pale basemap and stay distinct. `PALETTE_SIZE` in `zones.py`
+  must match `ZONE_COLORS` in `MapView.tsx` or zones fall back to grey - there
+  is a test for it.
 - Balance numbers move a lot with scope, so re-measure before quoting them.
   Under the earlier walking-distance scope these same hubs read 22.7% / 30.4% /
   19.1%, and Phase 4's original "~10%" claim came from testing one hub only.
@@ -171,6 +189,23 @@ losing one door. `Stop.uncapped_dwell_seconds` keeps the real figure.
 
 ## Remaining external dependency
 
-Basemap raster tiles (CARTO) are still fetched live. Phase 6 should replace
-them with a local `.pmtiles` extract for the district bbox so the app works
-with no signal in the field.
+Basemap vector tiles (**OpenFreeMap**, `tiles.openfreemap.org/styles/liberty`)
+are still fetched live. Phase 6 should replace them with a local `.pmtiles`
+extract for the district bbox so the app works with no signal in the field.
+
+- **CARTO was dropped in August 2026.** It began serving an "API KEY REQUIRED"
+  watermark instead of tiles its origin would not render. Open water went
+  first (Port Phillip Bay, Bass Strait, every ocean tile returns the same
+  1,790-byte image, md5 `41ce3f8f…`) while land still came back normally, so
+  the whole Kew district rendered fine and the failure looked intermittent.
+  Those watermark responses carry `max-age=15552000` — **180 days** — so a
+  browser that caches one keeps showing it long after the service recovers.
+  If a stale watermark ever reappears, hard-reload before debugging anything.
+- OpenStreetMap's own tile server is keyless too but was rejected: the OSMF
+  tile usage policy asks applications not to use it.
+- OpenFreeMap needs no key and no account. Attribution (OpenFreeMap,
+  OpenMapTiles, OpenStreetMap) comes through the source's TileJSON, so
+  MapLibre renders the credit without any code.
+- Its vector tiles are ~120-180 KB against CARTO's ~17 KB rasters. That is the
+  wrong direction for a volunteer on mobile data and makes the Phase 6
+  `.pmtiles` extract more urgent, not less.

@@ -141,6 +141,49 @@ export interface Territories {
   features: TerritoryFeature[];
 }
 
+export interface ZoneSummary {
+  id: string;
+  label: string;
+  doors: number;
+  stops: number;
+  blockfaces: number;
+  streets: string[];
+  minutes: number;
+  /** [south, west, north, east] */
+  bbox: [number, number, number, number];
+  dropped_doors: number;
+  palette: number;
+}
+
+export interface ZoneFeature {
+  type: "Feature";
+  id: string;
+  geometry: MultiLineString | MultiPoint;
+  properties: {
+    zone: string;
+    palette: number;
+    label: string;
+    street: string;
+    doors: number;
+  };
+}
+
+export interface Zones {
+  type: "FeatureCollection";
+  target_doors: number;
+  zone_count: number;
+  total_doors: number;
+  covered_doors: number;
+  dropped_doors: number;
+  dropped_blockfaces: number;
+  coverage_pct: number;
+  size_spread_pct: number;
+  /** Streets too big to fit one zone, so they span two. Reported, not hidden. */
+  split_streets: string[];
+  zones: ZoneSummary[];
+  features: ZoneFeature[];
+}
+
 export interface ReverseResult {
   label: string;
   lat: number;
@@ -175,4 +218,5 @@ export const api = {
     get<WalkRoute>("/api/walk/route", { from_lat, from_lon, to_lat, to_lon }),
   territories: (lat: number, lon: number, teams: number, radius_m: number) =>
     get<Territories>("/api/territories", { lat, lon, teams, radius_m }),
+  zones: (target_doors: number) => get<Zones>("/api/zones", { target_doors }),
 };

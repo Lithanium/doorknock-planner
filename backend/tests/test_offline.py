@@ -95,6 +95,12 @@ def test_hub_preview_works_offline(offline_client):
     assert body["nearest_address"]
 
 
+def test_zones_work_offline(offline_client):
+    body = offline_client.get("/api/zones", params={"target_doors": 400}).json()
+    assert body["zone_count"] > 20
+    assert body["coverage_pct"] > 99
+
+
 def test_territories_work_offline(offline_client):
     body = offline_client.get(
         "/api/territories",

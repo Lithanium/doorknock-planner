@@ -10,6 +10,12 @@ from app.services import SnapshotMissingError, SnapshotStore
 from app.stops import build_stops
 from app.territory import MAX_TEAMS, build_territories
 from app.walkgraph import WALKING_SPEED_M_PER_MIN
+from app.zones import (
+    DEFAULT_TARGET_DOORS,
+    MAX_TARGET_DOORS,
+    MIN_TARGET_DOORS,
+    palette_indexes,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -27,6 +33,23 @@ def _blockfaces_within(store: SnapshotStore, reachable_ids: set[str]) -> list[Bl
     """
     trimmed = (b.clipped_to_stops(reachable_ids) for b in store.blockfaces)
     return [b for b in trimmed if b is not None]
+
+
+def _blockface_geometry(face: Blockface) -> dict:
+    """Drawable geometry for a run of work.
+
+    Off-network fallbacks have no carriageway in the extract, so they draw as
+    their stop points rather than vanishing from the map.
+    """
+    if face.path:
+        return {
+            "type": "MultiLineString",
+            "coordinates": [[[lon, lat] for lat, lon in chain] for chain in face.path],
+        }
+    return {
+        "type": "MultiPoint",
+        "coordinates": [[s.lon, s.lat] for s in face.stops],
+    }
 
 
 def _parse_bbox(bbox: str) -> tuple[float, float, float, float]:
@@ -298,25 +321,11 @@ def territories(
     features = []
     for territory in plan.territories:
         for b in territory.blockfaces:
-            if b.path:
-                geometry: dict = {
-                    "type": "MultiLineString",
-                    "coordinates": [
-                        [[pt_lon, pt_lat] for pt_lat, pt_lon in chain] for chain in b.path
-                    ],
-                }
-            else:
-                # Off-network fallbacks have no carriageway geometry, so they
-                # draw as their stop points instead of vanishing.
-                geometry = {
-                    "type": "MultiPoint",
-                    "coordinates": [[s.lon, s.lat] for s in b.stops],
-                }
             features.append(
                 {
                     "type": "Feature",
                     "id": b.blockface_id,
-                    "geometry": geometry,
+                    "geometry": _blockface_geometry(b),
                     "properties": {
                         "team": territory.team,
                         "label": b.label,
@@ -339,6 +348,43 @@ def territories(
         "spread_pct": round(plan.spread_pct * 100, 1),
         "split_streets": plan.split_streets,
         "teams": [t.to_dict() for t in plan.territories],
+        "features": features,
+    }
+
+
+@router.get("/zones")
+def zones(
+    request: Request,
+    target_doors: int = Query(
+        default=DEFAULT_TARGET_DOORS, ge=MIN_TARGET_DOORS, le=MAX_TARGET_DOORS
+    ),
+) -> dict:
+    """Cuts the whole electorate into connected zones of about N doors each."""
+    _require_snapshot(request)
+    plan = _store(request).zones(target_doors)
+    colours = palette_indexes(plan.zones)
+    features = [
+        {
+            "type": "Feature",
+            "id": f"{zone.zone_id}/{b.blockface_id}",
+            "geometry": _blockface_geometry(b),
+            "properties": {
+                "zone": zone.zone_id,
+                "palette": colours[zone.zone_id],
+                "label": b.label,
+                "street": b.street,
+                "doors": b.door_count,
+            },
+        }
+        for zone in plan.zones
+        for b in zone.blockfaces
+    ]
+    return {
+        "type": "FeatureCollection",
+        **plan.to_dict(),
+        "zones": [
+            {**zone.to_dict(), "palette": colours[zone.zone_id]} for zone in plan.zones
+        ],
         "features": features,
     }
 

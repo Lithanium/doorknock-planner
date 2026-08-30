@@ -316,6 +316,133 @@ def test_neighbouring_doors_on_one_street_route_almost_directly(real_walk_graph)
     assert route.distance_m < 3 * haversine_m(a, b) + 50
 
 
+class TestRealZones:
+    """Cutting the whole electorate into fixed-size zones."""
+
+    def test_the_district_divides_into_about_the_expected_number_of_zones(
+        self, real_snapshot, real_blockfaces
+    ):
+        from app.zones import build_zones
+
+        plan = build_zones(real_blockfaces, target_doors=100)
+        expected = len(real_snapshot.addresses) / 100
+        assert expected * 0.8 < len(plan.zones) < expected * 1.2
+
+    def test_almost_every_door_is_covered(self, real_blockfaces):
+        from app.zones import build_zones
+
+        plan = build_zones(real_blockfaces, target_doors=100)
+        assert plan.coverage_pct > 0.99
+        assert plan.covered_doors + plan.dropped_doors == plan.total_doors
+
+    def test_no_blockface_lands_in_two_zones(self, real_blockfaces):
+        from app.zones import build_zones
+
+        plan = build_zones(real_blockfaces, target_doors=100)
+        ids = [b.blockface_id for z in plan.zones for b in z.blockfaces]
+        assert len(ids) == len(set(ids))
+
+    def test_zone_sizes_cluster_on_the_target(self, real_blockfaces):
+        """Measured: 97% within +/-25% at a 100-door target, 100% at 200 and up."""
+        from app.zones import build_zones
+
+        for target, expected in ((100, 0.90), (200, 0.99)):
+            plan = build_zones(real_blockfaces, target_doors=target)
+            close = sum(
+                1 for z in plan.zones if target * 0.75 <= z.door_count <= target * 1.25
+            )
+            share = close / len(plan.zones)
+            assert share >= expected, f"target {target}: only {share:.0%} near target"
+
+    def test_the_offered_targets_all_come_out_tight(self, real_blockfaces):
+        """The sidebar offers 400-800; at those sizes every zone should land
+        within a tenth of the target. Measured at 700: 674-723 doors."""
+        from app.zones import build_zones
+
+        for target in (400, 500, 600, 700, 800):
+            plan = build_zones(real_blockfaces, target_doors=target)
+            doors = [z.door_count for z in plan.zones]
+            assert min(doors) >= target * 0.85, f"target {target}: smallest {min(doors)}"
+            assert max(doors) <= target * 1.15, f"target {target}: largest {max(doors)}"
+            assert plan.coverage_pct > 0.99
+
+    def test_every_offered_target_fits_the_map_palette(self, real_blockfaces):
+        """A zone falling past the palette would be drawn fallback grey."""
+        from app.zones import PALETTE_SIZE, _boxes_touch, build_zones, palette_indexes
+
+        for target in (400, 500, 600, 700, 800):
+            zones = build_zones(real_blockfaces, target_doors=target).zones
+            colours = palette_indexes(zones)
+            assert max(colours.values()) < PALETTE_SIZE
+            clashes = [
+                (a.zone_id, b.zone_id)
+                for i, a in enumerate(zones)
+                for b in zones[i + 1 :]
+                if _boxes_touch(a.bbox, b.bbox) and colours[a.zone_id] == colours[b.zone_id]
+            ]
+            assert clashes == [], f"target {target}: {clashes[:3]}"
+
+    def test_every_zone_is_a_single_connected_component(self, real_blockfaces):
+        from app.zones import _adjacency, build_zones
+
+        plan = build_zones(real_blockfaces, target_doors=100)
+        for zone in plan.zones:
+            faces = list(zone.blockfaces)
+            if len(faces) <= 1:
+                continue
+            adjacency = _adjacency(faces)
+            seen, stack = {0}, [0]
+            while stack:
+                for neighbour in adjacency[stack.pop()]:
+                    if neighbour not in seen:
+                        seen.add(neighbour)
+                        stack.append(neighbour)
+            assert len(seen) == len(faces), f"{zone.zone_id} ({zone.label}) is in pieces"
+
+    def test_zones_are_local_not_smeared_across_the_district(self, real_blockfaces):
+        """The district is 5.2 x 9.6 km; a 100-door zone must be far smaller."""
+        from app.osm.boundary import haversine_m
+        from app.zones import build_zones
+
+        plan = build_zones(real_blockfaces, target_doors=100)
+        diagonals = []
+        for zone in plan.zones:
+            south, west, north, east = zone.bbox
+            diagonals.append(haversine_m((south, west), (north, east)))
+        diagonals.sort()
+        assert diagonals[len(diagonals) // 2] < 800
+        assert max(diagonals) < 3_000
+
+    def test_a_bigger_target_yields_proportionally_fewer_zones(self, real_blockfaces):
+        from app.zones import build_zones
+
+        hundred = build_zones(real_blockfaces, target_doors=100)
+        four_hundred = build_zones(real_blockfaces, target_doors=400)
+        ratio = len(hundred.zones) / len(four_hundred.zones)
+        assert 3.0 < ratio < 5.0
+
+    def test_partitioning_is_deterministic(self, real_blockfaces):
+        from app.zones import build_zones
+
+        first = build_zones(real_blockfaces, target_doors=200)
+        second = build_zones(real_blockfaces, target_doors=200)
+        assert [z.zone_id for z in first.zones] == [z.zone_id for z in second.zones]
+        assert [z.door_count for z in first.zones] == [z.door_count for z in second.zones]
+
+    def test_touching_zones_never_share_a_map_colour(self, real_blockfaces):
+        from app.zones import _boxes_touch, build_zones, palette_indexes
+
+        zones = build_zones(real_blockfaces, target_doors=200).zones
+        colours = palette_indexes(zones)
+        clashes = [
+            (a.zone_id, b.zone_id)
+            for i, a in enumerate(zones)
+            for b in zones[i + 1 :]
+            if _boxes_touch(a.bbox, b.bbox) and colours[a.zone_id] == colours[b.zone_id]
+        ]
+        assert clashes == []
+
+
 TERRITORY_HUB = (-37.8071644, 145.0320872)  # 50 Cotham Road, near Kew Junction
 
 

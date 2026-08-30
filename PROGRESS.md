@@ -17,7 +17,7 @@ is proven to work**.
 | 6 | Volunteer interface | Not started |
 | 7 | Field hardening | Not started |
 
-Current state: **338 backend tests + clean frontend typecheck.** Phase 4 draws
+Current state: **379 backend tests + clean frontend typecheck.** Phase 4 draws
 colour-coded team territories on the map; Phase 3's own blockface layer (all
 2,760 at once, unpartitioned) is still not rendered, but territories cover the
 practical need: every reachable blockface is drawn once a team count is picked.
@@ -428,6 +428,54 @@ this hub, a 2-door Barkers Road remnant 280 m from the nearest other work.
 
 ---
 
+## Electorate zones (added alongside Phase 4)
+
+A second, simpler way to carve the map, independent of any hub: cut the **whole
+electorate** into connected patches holding roughly a set number of doors. Where
+territories answer "split this session between my N teams", zones answer "give
+me the district in 600-door pieces".
+
+- `backend/app/zones.py` — `build_zones(blockfaces, target_doors)` -> `ZonePlan`.
+  Recursive proportional median splits on the longer axis in **metres** (a
+  degree of longitude is ~790 m here against ~111 km for latitude, so comparing
+  raw degrees would slice everything one way). Cuts land between whole
+  blockfaces, so a run of houses is never divided.
+- Each zone is reduced to its **largest walk-connected component**; anything
+  stranded (the far side of the freeway, an isolated pocket) is dropped and
+  counted, since full coverage was never the requirement.
+- `GET /api/zones?target_doors=` and sidebar section "4. Electorate zones",
+  offering 400/500/600/700/800 doors. Dashed boxes show each cut; solid
+  coloured lines show the streets that ended up in it.
+
+**Verified** (379 backend tests, 24 new in `test_zones` plus 6 real-snapshot):
+
+| Target | Zones | Doors per zone | Coverage | Colours used |
+| ------ | ----- | -------------- | -------- | ------------ |
+| 400 | 71 | 366-425 | 99.9% | 6 |
+| 500 | 57 | 451-557 | 99.9% | 5 |
+| 600 | 48 | 567-613 | 99.8% | 5 |
+| 700 | 41 | 674-723 | 100.0% | 5 |
+| 800 | 36 | 746-823 | 99.9% | 5 |
+
+Every zone is asserted to be a single connected component, no blockface lands in
+two zones, and the partition is deterministic.
+
+**A street can span two zones**, and that is a limit of the request rather than
+a fault: High Street alone holds 150 doors, so no 100-door zone could contain
+it. `split_streets` reports every street it happens to.
+
+**Zone colours were chosen, not guessed.** The first attempt reused a 12-colour
+list holding crimson, maroon *and* brown, which read as three shades of red on
+a 4 px line. Since a greedy colouring provably needs only 5-6 colours here, the
+palette is now **8 colours, one per hue family**, selected by maximising the
+smallest perceptual (CIE Lab) gap: 33.7 across all eight, 40.3 across the first
+six, every one at least 56 from the basemap's own lightness, no two chromatic
+entries within 27 degrees of hue. Yellow, olive and brown are excluded on
+purpose — yellow has no dark saturated form, so it cannot both read against a
+pale basemap and stay distinct from orange.
+
+---
+
 ## Phase 5 — Routing with capacity and priority
 
 OR-Tools (`ortools==9.15.6755`, confirmed to have a cp314 arm64 wheel) with
@@ -451,9 +499,17 @@ street (`Smith St #2 -> #48 even side (24 doors)`, `Cross at the lights on
 Main Rd`, `Restock at hub`), route line plus live GPS, tap-to-tick-off in
 `localStorage`, and a print/PDF view as paper backup.
 
-Also replace the CARTO raster basemap with a local `.pmtiles` extract for the
+Also replace the OpenFreeMap basemap with a local `.pmtiles` extract for the
 district bbox — the last remaining network dependency, and the one that matters
 on a footpath with no signal.
+
+> **More urgent than it was.** CARTO started serving an "API KEY REQUIRED"
+> watermark in August 2026 and had to be swapped out mid-build; a hosted
+> basemap can change terms under you without notice. The replacement
+> (OpenFreeMap, keyless) also ships ~120-180 KB vector tiles against CARTO's
+> ~17 KB rasters, which is the wrong direction for a volunteer on mobile data.
+> A local extract fixes both problems at once, and the district is only
+> 5.2 x 9.6 km.
 
 **Verify:** open on a phone over LAN, pick a team, and **walk one block**.
 Order should match what a sensible person would do; ticks survive a refresh.

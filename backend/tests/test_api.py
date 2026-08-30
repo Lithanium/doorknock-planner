@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from app.zones import PALETTE_SIZE
+
 
 def test_health_without_a_snapshot_is_still_ok(empty_client):
     body = empty_client.get("/api/health").json()
@@ -351,6 +353,56 @@ def test_territories_cover_at_least_the_walkable_workload(client):
         params={"lat": -37.800, "lon": 145.050, "teams": 2, "radius_m": 800},
     ).json()
     assert body["blockface_count"] >= preview["walk"]["blockfaces_within"] > 0
+
+
+def test_zones_partition_the_whole_electorate(client):
+    body = client.get("/api/zones", params={"target_doors": 20}).json()
+    assert body["type"] == "FeatureCollection"
+    assert body["zone_count"] >= 1
+    assert body["target_doors"] == 20
+    assert body["covered_doors"] + body["dropped_doors"] == body["total_doors"]
+    assert 0 < body["coverage_pct"] <= 100
+
+
+def test_zone_features_carry_their_zone_and_colour(client):
+    body = client.get("/api/zones", params={"target_doors": 20}).json()
+    ids = {z["id"] for z in body["zones"]}
+    assert ids
+    for feature in body["features"]:
+        props = feature["properties"]
+        assert props["zone"] in ids
+        assert 0 <= props["palette"] < PALETTE_SIZE
+        assert props["doors"] > 0
+        assert feature["geometry"]["type"] in ("MultiLineString", "MultiPoint")
+
+
+def test_zone_summaries_carry_a_bbox_and_door_count(client):
+    body = client.get("/api/zones", params={"target_doors": 20}).json()
+    for zone in body["zones"]:
+        south, west, north, east = zone["bbox"]
+        assert south <= north and west <= east
+        assert zone["doors"] > 0
+        assert zone["streets"]
+
+
+def test_a_bigger_target_gives_fewer_zones(client):
+    small = client.get("/api/zones", params={"target_doors": 20}).json()
+    large = client.get("/api/zones", params={"target_doors": 2000}).json()
+    assert small["zone_count"] >= large["zone_count"]
+
+
+def test_zones_reject_a_target_outside_the_useful_range(client):
+    """Below ~20 doors a zone is smaller than a single blockface; above 2,000
+    it is most of a suburb."""
+    assert client.get("/api/zones", params={"target_doors": 0}).status_code == 422
+    assert client.get("/api/zones", params={"target_doors": 19}).status_code == 422
+    assert client.get("/api/zones", params={"target_doors": 99_999}).status_code == 422
+
+
+def test_zones_without_a_snapshot_explain_the_fix(empty_client):
+    response = empty_client.get("/api/zones", params={"target_doors": 100})
+    assert response.status_code == 503
+    assert "fetch-district" in response.json()["detail"]
 
 
 def test_territories_without_a_snapshot_explain_the_fix(empty_client):
